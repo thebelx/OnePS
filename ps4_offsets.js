@@ -24,7 +24,7 @@ const SHARED_KERNEL_13 = {
     PRISON0_addr:  0x0111FA18,
     ROOTVNODE_addr:0x02136E90,
     SYSENT_addr:   0x01102B70,
-    ALLPROC_addr:  0x01B28538,
+    ALLPROC_addr:  0x01CA8538,
     M_TEMP_addr:   0x01520D00,
 };
 
