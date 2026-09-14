@@ -1,4 +1,4 @@
-let DRAIN_COUNT = 512;
+let DRAIN_COUNT = 256;
 const AUTO_RETRY_DELAY_MS = 50;
 
 const K = 2;
@@ -19,7 +19,7 @@ const CARRIER_SLOTS = (function () {
         const n = q ? parseInt(q, 10) : 0;
         if (n >= 100000 && n <= 40000000) return n;
     } catch (e) { }
-    return 12000000;
+    return 4000000;
 })();
 const CARRIER_BYTES = CARRIER_SLOTS * 8;
 const CAPTURE_DELAY_MS = 50;
@@ -42,13 +42,13 @@ const _gOverride = (function () {
 const _g = (name, dflt) => (typeof _gOverride[name] === "number" ? _gOverride[name] : dflt);
 if (typeof _gOverride.drain === "number") DRAIN_COUNT = _gOverride.drain;
 
-const DRAIN_SIZE = _g("drainsz", 0x10000);
-const SLAB_SIZE = _g("slab", 0x400000);
+const DRAIN_SIZE = _g("drainsz", 0x2000);      // was 0x10000
+const SLAB_SIZE = _g("slab", 0x080000);
 const BUTTERFLY_HOLE_SIZE = _g("bfly", 0x81000);
 const SEPARATOR_SIZE = _g("sep", 0x10000);
 const EARLY_HOLE_SIZE = _g("early", 0x70000);
 const GUARD_SIZE = _g("guard", 0x90000);
-const PREDECESSOR_SIZE = _g("pred", 0x80000);
+const PREDECESSOR_SIZE = _g("pred", 0xa0000);
 const FINAL_HOLE_SIZE = _g("final", 0x80000);
 
 const RW_BUFFER_SIZE = 0x100;

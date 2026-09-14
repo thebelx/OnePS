@@ -85,7 +85,7 @@ window.addEventListener("unhandledrejection", (ev) => {
 
         try {
             carrier = await establishPrimitive({
-                maxAttempts: 4,
+                maxAttempts: 1,
                 onEvent: (t, d) => {
                     mark(t, d || "");
                     const s = String(d || "").toLowerCase();

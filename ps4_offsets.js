@@ -1,5 +1,4 @@
 // ps4_offsets.js — Poops 13.02 / 13.04 only
-// developed by H4SS9M
 
 export const REQUIRED_KEYS = [
     "fw_status",

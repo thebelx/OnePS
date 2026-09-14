@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#07131f">
 <meta name="author" content="bel">
 <meta name="description" content="OnePS — the one piece is PRIM-OK. A public note on the last mile of the 13.02 chain.">
-<title>OnePS — bel — the one piece is PRIM-OK</title>
+<title>OnePS — the one piece is PRIM-OK</title>
 <style>
   :root{
     --bg:#06121b; --bg2:#0a1e2b; --panel:rgba(8,26,38,.72);
@@ -88,7 +88,6 @@
   }
   pre#out::-webkit-scrollbar{width:8px}
   pre#out::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
-  pre#out::selection{background:rgba(57,174,202,.35)}
   #state{display:none}
   .prize{
     margin:64px 0 0;padding:36px;border:1px solid var(--gold);
@@ -122,6 +121,11 @@
     color:var(--ink);
   }
   .banner b{color:var(--gold)}
+  table{border-collapse:collapse;width:100%;margin:20px 0;
+    font:400 13px/1.5 var(--mono)}
+  th,td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:400;letter-spacing:.06em}
+  td code{background:transparent;padding:0}
 </style>
 </head>
 <body>
@@ -145,9 +149,9 @@
   </p>
 
   <div class="banner">
-    <b>Everything in this chain depends on one value.</b> It's not a config knob, not
-    an offset, not a slab size. It's a function. Its absence is the difference between
-    a jailbreak that runs on every cold boot and a jailbreak that hits one time in six.
+    <b>Everything in this chain depends on one value.</b> Not a URL knob, not an offset,
+    not a slab size. A function. Its absence is the difference between a chain that
+    runs on every cold boot and one that hits somewhere between 1 in 7 and 1 in 15.
     Read the section titled <em>Where the road actually ends</em>.
   </div>
 
@@ -172,17 +176,11 @@
   <h2>Credit where it's due</h2>
 
   <p>
-    <b>Hassan</b> found the original SSV shape. The <code>k=2</code> duplicate-index
-    trick, the predecessor fill, the <code>history.replaceState</code> collision — that's
-    his research. Everything below is built on top of it. I'm publishing this because
-    his work deserves a clean writeup, and because the last mile is missing and I want
+    <b>SOMEONE ELSE</b> found the original SSV shape. The <code>k=2</code> duplicate-index
+    trick, the predecessor fill, the <code>history.replaceState</code> collision that's
+    NOT my research. Everything below is built on top of it. I'm publishing this because
+    the work deserves a clean writeup, and because the last mile is missing and I want
     the community to look at it.
-  </p>
-
-  <p>
-    The offsets for 13.02 are from public dumps. The kernel walk is mine. The
-    <code>plausibleAddress</code> fix is mine. The realisation that
-    <code>beforeCriticalLoad</code> is the missing piece is the point of this page.
   </p>
 
   <h2>What I tried</h2>
@@ -217,55 +215,53 @@
     Mine covers a fifth of it.
   </p>
 
-  <h3>Cold boots</h3>
+  <h3>Timing is a gate, not a knob</h3>
   <p>
-    Thirty of them. <code>PRIM-OK</code> printed twice.
+    Two failure modes bound the correct timing window:
   </p>
   <p>
-    Every cold boot re-rolls KASLR: kernel base, WebKit base, JSC heap base. The
-    exploit is deterministic for a given layout. A config matches some fraction of
-    layouts. Mine matches roughly 15%.
+    <b>Open too early</b> → the OS is still claiming memory → <code>OOM</code> at
+    <code>ADDROF-PREP-BEGIN</code>. Observed at ~2 min after cold boot on my console.
   </p>
   <p>
-    At 15% per roll, ten cold boots is an 80% chance of a hit. Twenty is 96%. Thirty
-    gave two hits — exactly the distribution.
-  </p>
-
-  <h3>The paths that don't work at all</h3>
-  <p>
-    <code>chain_poops.js</code> — the full chain with jailbreak, kernel patches, payload
-    thread — does not work on 13.02. Sony patched the <code>netcontrol</code> refcount
-    imbalance. <code>SET</code> does <code>fget</code> +1 and does not drop the ref on
-    the fresh-store path. <code>CLEAR</code> does <code>fget</code> +1 and drops twice.
-    Net: zero. On 13.00 <code>SET</code> did an unconditional <code>fdrop</code>, giving
-    net −1 per pair, which is the UAF. On 13.02 the <code>fdrop</code> is conditional.
-    Every run of <code>chain_poops.js</code> on 13.02 dead-ends at
-    <code>ALIAS-PROBE partner=-</code>. Forever.
+    <b>Open too late</b> → pages have been freed and zeroed by background collection
+    → <code>ZERO-HEADER-MISS hex=0000...</code>. Observed when waiting longer than
+    ~4 minutes.
   </p>
   <p>
-    <code>ipmi_test.js</code> — probes syscall 622. Uses the same <code>window.p</code>
-    primitive. Same lottery. Does not bypass anything. An entirely separate investigation
-    that happens to need the same foundation.
+    The working window is narrow. It also moves per console and per boot. The honest
+    thing to do on your own hardware is to sweep intervals — 150 s, 180 s, 210 s,
+    240 s, 270 s, 300 s — two cold boots per interval, and record which interval
+    produces the fewest <code>OOM</code>s and the fewest <code>ZERO-HEADER-MISS</code>es.
+    That interval is your window.
   </p>
 
-  <h3>What broke and got fixed</h3>
+  <h2>The four outcomes</h2>
+
   <p>
-    <code>phex()</code> and <code>i64ToNum()</code> read <code>v.lo</code> instead of
-    <code>v.low</code>. <code>int64.js</code> stores the low half as <code>.low</code>.
-    Every read printed <code>0x0000000200000000</code> because the low 32 bits came back
-    <code>undefined</code>. Five characters, four places.
+    Every cold boot ends in exactly one of four classifications. Everything else in
+    the log is commentary.
   </p>
+
+  <table>
+    <tr><th>tag</th><th>meaning</th></tr>
+    <tr><td><code>OOM</code></td><td>died before SSV. Memory budget or timing.</td></tr>
+    <tr><td><code>DESERIALIZE-FAIL</code></td><td>SSV ran, state blob clobbered. <code>Unable to deserialize</code>.</td></tr>
+    <tr><td><code>PLACEMENT-FAIL</code></td><td>SSV ran, blob survived, cell landed wrong. <code>ZERO-HEADER-MISS</code> / <code>VALIDATION-MISMATCH</code>.</td></tr>
+    <tr><td><code>PRIM-OK</code></td><td>SSV ran, cell landed on pattern. Primitive live.</td></tr>
+  </table>
+
   <p>
-    <code>plausibleAddress()</code> rejected kernel addresses. It was written for JSC
-    heap bounds and threw on <code>0xffffffff80000000</code>. Every read past
-    <code>BASES</code> died. Fixed by adding a kernel branch.
+    The URL knobs change how often you get each tag. They do not change the fact that
+    only <code>PRIM-OK</code> proceeds.
   </p>
 
   <h2>Where the road actually ends</h2>
 
   <p>
-    Here is the thing I have been circling for a week. There is one function in
-    <code>core.js</code> whose absence is the difference between 15% and 95%:
+    Here is the thing I have been circling. There is one function in
+    <code>core.js</code> whose absence is the difference between a per-boot hit rate
+    between 7% and 15% and a per-boot hit rate near 100%:
   </p>
 
   <p style="text-align:center;font-family:var(--mono);font-size:16px;color:var(--gold);margin:32px 0">
@@ -294,47 +290,115 @@
   <blockquote>
     Whoever has a real <code>beforeCriticalLoad</code> for 13.02 is holding the one piece.
     Everything in this chain depends on that one function. Every other knob — slab, pred,
-    sep, slots, drain — is a workaround for its absence. Find it, and the cold boots go
-    away, the OOMs go away, the ZERO-HEADER-MISSes go away, and the chain runs first try
-    like the FW 11.00 reference does.
+    sep, slots, drain — is a workaround for its absence.
   </blockquote>
 
-  <h2>The ask</h2>
+  <h2>The probability model</h2>
 
   <p>
-    Run the launcher below. One cold boot. One URL. One roll of the dice.
+    Two independent gates. The chain must survive the first to test the second.
+  </p>
+
+  <p style="text-align:center;font-family:var(--mono);margin:24px 0;font-size:14px">
+    P(success) = P(T) × P(A | T)
   </p>
 
   <p>
-    If <code>PRIM-OK</code> prints, the chain is real. The walk runs. The
-    <code>FN_BYTES</code> line that comes out the other end names <code>pru_bind</code>
-    in Ghidra. That answers the question I started with.
+    <code>T</code> is the timing/allocator gate: the boot lands in the window where the
+    OS has stopped claiming memory but GC hasn't zeroed the pages. <code>A</code> is
+    the placement gate: the deserializer hands out the cell at exactly the address the
+    predecessor pattern covers.
   </p>
 
   <p>
-    Send me that <code>FN_BYTES</code> line. Post it publicly. Or send the whole
-    terminal output. <em>That value is the one piece.</em>
+    Observed on my console:
+  </p>
+
+  <table>
+    <tr><th>quantity</th><th>estimate</th><th>note</th></tr>
+    <tr><td>P(T)</td><td>~0.25</td><td>fraction of cold boots in the timing window</td></tr>
+    <tr><td>P(A | T)</td><td>~0.15</td><td>fraction of in-window boots where placement lands</td></tr>
+    <tr><td>P(success)</td><td>~0.04</td><td>1 in ~25 cold boots</td></tr>
+  </table>
+
+  <p>
+    The exact number is uncertain. Two <code>PRIM-OK</code> events were observed across
+    the test session. Depending on how you count the trials — all cold boots, or only
+    the ones that reached the SSV stage — the point estimate is between 7% and 13%.
+    Two successes is too small a sample to distinguish 7% from 15%. The writeup's
+    "13–15%" figure should be read as a working estimate with a wide confidence
+    interval, not a measured rate.
   </p>
 
   <p>
-    If <code>PRIM-OK</code> does not print, you got one of four failure modes. Every one
-    is documented above. Cold boot and try again. The dice are the dice.
+    <b>The URL knobs affect two things and only two things:</b> whether the carrier
+    covers the leaked string (coverage floor), and whether the total allocation fits
+    under the browser's sysmemory pool (memory ceiling). Whether they affect
+    <code>P(A | T)</code> at all — placement probability given a good timing roll — is
+    an open question the repository can answer but which has not been tested in a
+    controlled way.
   </p>
 
-  <hr>
+  <h2>Formula sheet</h2>
+
+  <p>
+    Two exact formulas, and everything else empirical.
+  </p>
+
+  <p><b>Coverage floor.</b> The carrier must be large enough to cover the leaked
+  string. If <code>copiedLength</code> chars were leaked:</p>
+
+  <p style="text-align:center;font-family:var(--mono);margin:16px 0">
+    slots ≥ (copiedLength − 8) / 4
+  </p>
+
+  <p>
+    On 13.02 the leaked string is either ~924,176 chars (short roll) or ~34,478,608
+    chars (long roll). So the floor is either ~231,042 slots or ~8,619,650 slots.
+  </p>
+
+  <p><b>Memory ceiling.</b> The total allocation must fit under the browser's sysmemory
+  pool. On <code>fn_leak.html</code> after cold boot, observed ceiling is ~84 MB ±2 MB.
+  The budget is:</p>
+
+  <p style="text-align:center;font-family:var(--mono);margin:16px 0">
+    slots × 8 + drain × drainsz + slab + pred + holes ≤ 84 MB
+  </p>
+
+  <p>
+    Which gives <code>slots ≤ ~9,175,040</code> with the working values of the other
+    knobs.
+  </p>
+
+  <p><b>Everything else is empirical.</b> The working <code>slab</code> and
+  <code>pred</code> values depend on the boot's KASLR seed and JSC's allocator state,
+  neither of which is observable from JS before the SSV runs. <code>slab=0x800000</code>
+  and <code>pred=0xa0000</code> are landings on a per-boot curve whose shape is not
+  visible from JavaScript. They are not derived.
+  </p>
 
   <h2>How to run</h2>
 
   <div class="note">
-    <b>Cold boot required.</b> Close the browser completely. Power off the PS4 —
-    and unplug it for 30 seconds. Power on, wait two minutes, then open the browser.
-    Do not open any other tab. A warm boot or a reload reuses the previous renderer's
-    heap and the chain will OOM at <code>ADDROF-PREP-BEGIN</code>.
+    <b>Cold boot required.</b> Power off the PS4 and unplug it for
+    30 seconds. Plug back in, power on. Open the browser in the timing window you found
+    by sweeping. Do not open any other tab. A warm boot or a reload reuses the previous
+    renderer's heap and the chain will OOM at <code>ADDROF-PREP-BEGIN</code>.
+  </div>
+
+  <div class="note">
+    <b>If you see <code>AUTO-RETRY-SCHEDULED</code> in the log</b>, you are running a
+    stale cached copy of <code>core.js</code> or <code>fn_leak.js</code>. The current
+    build has <code>maxAttempts: 1</code> and will not retry in place. Serve the folder
+    with <code>Cache-Control: no-store</code>, or hard-clear the browser cache between
+    runs. The retry loop does not help — the second attempt reuses the first attempt's
+    heap garbage and fails at a different stage.
   </div>
 
   <p>
-    The launcher reads <code>core.js</code>, <code>int64.js</code>, <code>ps4_offsets.js</code>,
-    and <code>fn_leak.js</code> from the same directory. Nothing else is needed.
+    The launcher below applies the working defaults automatically. Press the button, the
+    chain runs once, one cold boot, one roll. If <code>PRIM-OK</code> does not print,
+    cold boot and try again.
   </p>
 
   <section class="launch">
@@ -369,15 +433,57 @@ FN_BYTES  (16 lines of hex)</pre>
     </p>
   </section>
 
+  <h2>Portability</h2>
+
+  <p>
+    Everything published here is 13.02. The missing piece — <code>beforeCriticalLoad</code>
+    — is likely portable to the rest of the 13.x line, because it operates on JSC's
+    allocator, not on the kernel. The JSC deduplication bug that lets a
+    <code>history.state</code> clone alias a freed cell is a JavaScriptCore bug, not a
+    Sony bug. If the same shape of <code>history.replaceState</code> call produces the
+    same deserialization path on 13.04 as it does on 13.02, the callback should work
+    unchanged, and so should the JS-side heap shaping in <code>core.js</code>.
+  </p>
+
+  <p>
+    What definitely does not travel is every offset in <code>ps4_offsets.js</code>. The
+    kernel RVAs, the libkernel stub table, the WebKit gadget offsets, and every anchor
+    (<code>k__error</code>, <code>wk_expm1_builtin</code>, <code>k_kl_lock</code>,
+    <code>k_sysent_661</code>, <code>allproc</code>) are compiled into a specific
+    firmware build. On 13.04 they are all different. Anyone porting has to re-derive
+    every one from their own kernel dump — the same procedure documented for 13.02,
+    with the same tools.
+  </p>
+
+  <p>
+    For 13.50 and 13.52 I have nothing. I don't know if the callback ports, I don't
+    know if the SSV bug is present in their WebKit build, I don't know if the offsets
+    are anywhere near 13.04's. Those are hypotheses worth testing, not results.
+  </p>
+
+  <div class="note">
+    <b>Disclaimer.</b> I have personally tested this chain on 13.02 and only 13.02.
+    Everything above about 13.04, 13.50, and 13.52 is reasoning, not empirical result.
+    Do not take it as a guarantee — take it as a hypothesis worth testing. If you get
+    any non-13.02 result, whether that's a working <code>PRIM-OK</code>, a new failure
+    mode, or an offset that differs, please reach out.
+  </div>
+
+  <p style="color:var(--gold);font-weight:700;margin-top:28px">
+    Everything in this chain depends on one value. On 13.02, that value is
+    <code>beforeCriticalLoad</code>. On every other firmware, it's that plus every
+    offset in <code>ps4_offsets.js</code>. The first one is portable in theory. The
+    second one is a week of Ghidra per firmware.
+  </p>
+
   <footer class="end">
     <p>
-      Original SSV research: <b>Hassan</b>. 13.02 offsets: public dumps.
+      Original SSV research: <b>Someone else</b>. 13.02 offsets: public dumps.
       Kernel walk, <code>plausibleAddress</code> fix, and this writeup: bel.
     </p>
     <p>
-      <b>Everything in this chain depends on one value.</b> It's not the slab, not the
-      predecessor, not the slot count. It's <code>beforeCriticalLoad</code>. Whoever
-      produces one that works on 13.02 has the one piece.
+      <b>Everything in this chain depends on one value.</b> Whoever produces a working
+      <code>beforeCriticalLoad</code> for 13.02 has the one piece.
     </p>
     <p>
       <a href="https://jb.0d01.wtf" target="_blank" rel="noopener">jb.0d01.wtf</a>
@@ -416,6 +522,20 @@ FN_BYTES  (16 lines of hex)</pre>
     goBtn.disabled = true;
     goBtn.textContent = "sailing\u2026";
     outEl.textContent = "";
+
+    // Apply the working defaults to the page URL so core.js picks them up.
+    // core.js reads location.search at module load, not the script's query string.
+    if (!new URLSearchParams(location.search).has("slots")) {
+      var u = new URL(location.href);
+      u.searchParams.set("slots", "4000000");
+      u.searchParams.append("g", "drain:256");
+      u.searchParams.append("g", "drainsz:0x2000");
+      u.searchParams.append("g", "slab:0x800000");
+      u.searchParams.append("g", "pred:0xa0000");
+      location.replace(u.toString());
+      return;
+    }
+
     var s = document.createElement("script");
     s.type = "module";
     s.src = "./fn_leak.js?v=" + Date.now();
