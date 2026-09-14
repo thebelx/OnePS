@@ -43,7 +43,7 @@ const _g = (name, dflt) => (typeof _gOverride[name] === "number" ? _gOverride[na
 if (typeof _gOverride.drain === "number") DRAIN_COUNT = _gOverride.drain;
 
 const DRAIN_SIZE = _g("drainsz", 0x2000);
-const SLAB_SIZE = _g("slab", 0x800000);            // FIXED: was 0x080000
+const SLAB_SIZE = _g("slab", 0x800000);
 const BUTTERFLY_HOLE_SIZE = _g("bfly", 0x81000);
 const SEPARATOR_SIZE = _g("sep", 0x10000);
 const EARLY_HOLE_SIZE = _g("early", 0x70000);
@@ -951,12 +951,6 @@ function loadHistoryCritical() {
         candidate = null;
         clearPredecessor();
 
-        // FIXED: free the 327k-element outerGraph as soon as the primitive
-        // is live. history.state was the only thing holding it, and the
-        // walk that follows needs the headroom. This used to run in
-        // reportComposition, after READ-PRIMITIVE-PASS -- too late on a
-        // tight 13.02 boot, which is why placement occasionally landed
-        // and then OOMed.
         try { history.replaceState(null, ""); } catch { }
 
         compositionState = 1;
@@ -1190,13 +1184,6 @@ function reportComposition() {
 
     emit("READ-PRIMITIVE-PASS", "arbitrary-read-established"
         + "-firmware-offsets-asserted=none");
-
-    // NOTE: the history.replaceState(null, "") that used to live here has
-    // moved up into loadHistoryCritical, right after liveCandidate was
-    // assigned. Doing it here -- after READ-PRIMITIVE-PASS -- meant the
-    // 327k-element state blob stayed live through the entire walk on a
-    // tight 13.02 boot, which is the OOM that occasionally killed a
-    // landed placement before it could finish.
 
     stopped = true;
     running = false;
