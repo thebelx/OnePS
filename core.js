@@ -17,7 +17,7 @@ const CARRIER_SLOTS = (function () {
     try {
         const q = new URLSearchParams(location.search).get("slots");
         const n = q ? parseInt(q, 10) : 0;
-        if (n >= 100000 && n <= 9000000) return n;   // FIX C: was 40000000
+        if (n >= 100000 && n <= 9000000) return n;
     } catch (e) { }
     return 4000000;
 })();
@@ -1380,8 +1380,6 @@ export function releaseFakeCell() {
         report.historyCleared = history.state === null;
     } catch (e) { console.warn("[core.releaseFakeCell] history reset threw:", e); }
 
-    // FIX D: if a caller was still awaiting establishPrimitive, reject
-    // their promise now instead of leaving it pending forever.
     const reject = settleReject;
     settleResolve = null;
     settleReject = null;
