@@ -1,548 +1,68 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#07131f">
-<meta name="author" content="bel">
-<meta name="description" content="OnePS — the one piece is PRIM-OK. A public note on the last mile of the 13.02 chain.">
-<title>OnePS — the one piece is PRIM-OK</title>
+<title>fn_leak</title>
 <style>
-  :root{
-    --bg:#06121b; --bg2:#0a1e2b; --panel:rgba(8,26,38,.72);
-    --ink:#d8f2f8; --muted:#7fa8b8; --dim:#4a7080;
-    --cyan:#39aeca; --lime:#4a9f55; --gold:#c9a961;
-    --line:rgba(57,174,202,.25);
-    --mono:Consolas,"DejaVu Sans Mono",monospace;
-    --serif:"Iowan Old Style","Palatino",Georgia,serif;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0;min-height:100vh;background:var(--bg);color:var(--ink);
-    font:16px/1.65 var(--serif)}
-  body{
-    background:
-      radial-gradient(1200px 800px at 50% -10%,rgba(57,174,202,.12),transparent 60%),
-      radial-gradient(900px 600px at 80% 100%,rgba(201,169,97,.08),transparent 60%),
-      linear-gradient(180deg,var(--bg2) 0,var(--bg) 60%,#050e15 100%);
-  }
-  header.masthead{
-    display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
-    padding:18px 28px;border-bottom:1px solid var(--line);
-    position:sticky;top:0;z-index:5;
-    backdrop-filter:blur(6px);background:rgba(6,18,27,.78);
-  }
-  header .brand{font:700 20px/1 var(--mono);letter-spacing:.24em;color:var(--cyan)}
-  header .brand b{color:var(--lime);font-weight:700}
-  header .tag{font:400 11px/1 var(--mono);letter-spacing:.24em;
-    color:var(--dim);text-transform:uppercase}
-  header .links{margin-left:auto;display:flex;gap:14px}
-  header .links a{
-    font:400 11px/1 var(--mono);letter-spacing:.14em;color:var(--muted);
-    text-decoration:none;text-transform:uppercase;
-  }
-  header .links a:hover{color:var(--cyan)}
-  main{max-width:820px;margin:0 auto;padding:40px 28px 120px}
-  h1{font:700 38px/1.15 var(--serif);margin:0 0 8px;color:var(--ink);
-    letter-spacing:-.01em}
-  h1 em{color:var(--gold);font-style:normal}
-  h2{font:700 22px/1.3 var(--serif);margin:52px 0 14px;color:var(--cyan)}
-  h3{font:700 17px/1.3 var(--serif);margin:30px 0 8px;color:var(--ink)}
-  p{margin:0 0 18px}
-  .byline{color:var(--muted);font:400 12px/1.4 var(--mono);
-    letter-spacing:.18em;text-transform:uppercase;margin:0 0 34px}
-  .byline a{color:var(--cyan);text-decoration:none}
-  .byline a:hover{text-decoration:underline}
-  .lede{font-size:19px;line-height:1.6;color:var(--ink)}
-  em{color:var(--cyan);font-style:normal}
-  code{font-family:var(--mono);font-size:13px;color:var(--cyan);
-    background:rgba(57,174,202,.06);padding:1px 5px;border-radius:2px}
-  blockquote{border-left:2px solid var(--gold);margin:28px 0;
-    padding:4px 0 4px 22px;color:var(--muted);font-style:italic;
-    font-size:17px}
-  hr{border:0;border-top:1px solid var(--line);margin:56px 0}
-  .note{font:400 13px/1.7 var(--mono);color:var(--muted);
-    padding:16px 18px;border:1px solid var(--line);border-radius:3px;
-    background:rgba(3,10,16,.5);margin:24px 0}
-  .note b{color:var(--ink)}
-  .launch{margin:34px 0 0;padding:26px;
-    border:1px solid var(--line);border-radius:4px;
-    background:var(--panel)}
-  .launch h2{margin-top:0}
-  .launch p.lead{color:var(--muted);margin:0 0 18px}
-  button#go{
-    display:block;width:100%;padding:18px;margin-top:6px;
-    background:linear-gradient(90deg,#2a6b7d,var(--cyan));
-    border:0;color:#06121b;font:700 15px/1 var(--mono);
-    letter-spacing:.24em;text-transform:uppercase;cursor:pointer;
-    border-radius:3px;
-    transition:filter .15s;
-  }
-  button#go:hover{filter:brightness(1.08)}
-  button#go:disabled{opacity:.45;cursor:not-allowed}
-  pre#out{
-    margin:20px 0 0;padding:16px;min-height:160px;max-height:480px;
-    overflow:auto;background:#030a10;border:1px solid var(--line);
-    border-radius:3px;font:12px/1.55 var(--mono);color:var(--muted);
-    white-space:pre-wrap;word-break:break-all;
-    scrollbar-width:thin;scrollbar-color:var(--line) transparent;
-  }
-  pre#out::-webkit-scrollbar{width:8px}
-  pre#out::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
-  #state{display:none}
-  .prize{
-    margin:64px 0 0;padding:36px;border:1px solid var(--gold);
-    border-radius:4px;background:rgba(201,169,97,.07);
-    position:relative;
-  }
-  .prize::before{
-    content:'';position:absolute;inset:6px;
-    border:1px solid rgba(201,169,97,.28);border-radius:2px;
-    pointer-events:none;
-  }
-  .prize h2{color:var(--gold);margin-top:0;font-size:26px}
-  .prize .call{font:700 19px/1.5 var(--serif);color:var(--gold);
-    margin:22px 0 18px}
-  .prize p{color:var(--ink)}
-  .prize pre{background:#030a10;padding:16px;border-radius:3px;
-    font:12px/1.6 var(--mono);color:var(--cyan);overflow:auto;
-    border:1px solid var(--line);margin:18px 0}
-  .prize .sig{color:var(--gold);font:400 14px/1.5 var(--mono);
-    margin-top:28px;letter-spacing:.06em}
-  footer.end{
-    margin-top:64px;padding-top:24px;border-top:1px solid var(--line);
-    font:400 12px/1.7 var(--mono);color:var(--dim);
-    letter-spacing:.06em;
-  }
-  footer.end a{color:var(--muted);text-decoration:none}
-  footer.end a:hover{color:var(--cyan)}
-  .banner{
-    padding:14px 18px;margin:0 0 34px;border-left:3px solid var(--gold);
-    background:rgba(201,169,97,.06);font:400 14px/1.6 var(--serif);
-    color:var(--ink);
-  }
-  .banner b{color:var(--gold)}
-  table{border-collapse:collapse;width:100%;margin:20px 0;
-    font:400 13px/1.5 var(--mono)}
-  th,td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--line)}
-  th{color:var(--muted);font-weight:400;letter-spacing:.06em}
-  td code{background:transparent;padding:0}
+/* jb.0d01.wtf palette, watered down. No external CSS, no fonts, no images. */
+:root{
+  --ink:#d8f2f8; --muted:#7fa8b8; --dim:#4a7080;
+  --bg0:#06121b; --bg1:#0a1e2b; --panel:rgba(8,26,38,.72);
+  --line:rgba(57,174,202,.25); --cyan:#39aeca; --lime:#4a9f55;
+  --mono:Consolas,"DejaVu Sans Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;background:var(--bg0);color:var(--ink);
+  font:13px/1.45 var(--mono);overflow:hidden}
+body{background:linear-gradient(180deg,var(--bg1) 0,var(--bg0) 60%,#050e15 100%);
+  display:flex;flex-direction:column}
+header{padding:10px 14px 8px;border-bottom:1px solid var(--line);
+  display:flex;align-items:baseline;gap:10px;flex:0 0 auto}
+h1{margin:0;font:700 15px/1.2 var(--mono);letter-spacing:.12em;color:var(--cyan)}
+h1 i{font-style:normal;color:var(--muted)}
+h1 b{font-weight:700;color:var(--lime)}
+#fw{margin-left:auto;color:var(--dim);font-size:11px;letter-spacing:.08em}
+#state{padding:6px 14px;font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--lime);
+  border-bottom:1px solid var(--line);flex:0 0 auto}
+#state.warn{color:#d8a640}#state.bad{color:#d85858}#state.ok{color:var(--lime)}
+main{flex:1 1 auto;min-height:0;display:flex}
+#out{flex:1 1 auto;margin:0;padding:10px 14px 40vh;overflow-y:auto;
+  white-space:pre-wrap;word-break:break-all;font-size:11.5px;line-height:1.5;
+  color:var(--muted);
+  scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+#out::-webkit-scrollbar{width:8px}
+#out::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+#out b{color:var(--cyan);font-weight:700}
+#out .ok{color:var(--lime)}
+#out .warn{color:#d8a640}
+#out .bad{color:#d85858;font-weight:700}
+footer{padding:4px 14px;font-size:10px;color:var(--dim);
+  border-top:1px solid var(--line);letter-spacing:.06em;flex:0 0 auto}
 </style>
 </head>
 <body>
-
-<header class="masthead">
-  <div class="brand">ONE<b>P</b>S</div>
-  <div class="tag">the one piece is prim-ok</div>
-  <div class="links">
-    <a href="https://jb.0d01.wtf" target="_blank" rel="noopener">jb.0d01.wtf</a>
-    <a href="https://x.com/belsploit" target="_blank" rel="noopener">@belsploit</a>
-  </div>
+<header>
+  <h1>fn<i>.</i>leak<b>.js</b></h1>
+  <span id="fw">detecting...</span>
 </header>
-
-<main>
-
-  <h1>The one piece is <em>PRIM-OK</em>.</h1>
-  <p class="byline">
-    by <a href="https://x.com/belsploit" target="_blank" rel="noopener">bel</a>
-    &nbsp;·&nbsp;
-    <a href="https://jb.0d01.wtf" target="_blank" rel="noopener">jb.0d01.wtf</a>
-  </p>
-
-  <div class="banner">
-    <b>Everything in this chain depends on one value.</b> Not a URL knob, not an offset,
-    not a slab size. A function. Its absence is the difference between a chain that
-    runs on every cold boot and one that hits somewhere between 1 in 7 and 1 in 15.
-    Read the section titled <em>Where the road actually ends</em>.
-  </div>
-
-  <p class="lede">
-    I started this with one question: <em>does <code>pru_bind</code> copy the sockaddr,
-    or retain it?</em> Everything since has been an attempt to answer that. Every
-    attempt goes through the same door. Its name is <code>PRIM-OK</code>.
-  </p>
-
-  <p>
-    <code>PRIM-OK</code> is what <code>core.js</code> prints when the SSV primitive lands.
-    It means the fake <code>JSArrayBuffer</code> is live in the heap, <code>p.read8</code>
-    and <code>p.write8</code> work, and the whole kernel walk is one function call away.
-    Without it, nothing downstream runs. No <code>BASES</code>. No <code>KBASE-PROBE</code>.
-    No <code>PROC</code>. No <code>PRU</code>. No <code>FN_BYTES</code>.
-  </p>
-
-  <p>
-    The entire chain sleeps behind one line of output. <em>That line is the one piece.</em>
-  </p>
-
-  <h2>Credit where it's due</h2>
-
-  <p>
-    <b>SOMEONE ELSE</b> found the original SSV shape. The <code>k=2</code> duplicate-index
-    trick, the predecessor fill, the <code>history.replaceState</code> collision that's
-    NOT my research. Everything below is built on top of it. I'm publishing this because
-    the work deserves a clean writeup, and because the last mile is missing and I want
-    the community to look at it.
-  </p>
-
-  <h2>What I tried</h2>
-
-  <h3>Every slab, every separator, every predecessor</h3>
-  <p>
-    <code>slab=0x200000</code> through <code>slab=0xe00000</code>. Only <code>0x800000</code>
-    keeps the state blob alive past the drains. Every other value gives
-    <code>Unable to deserialize</code>. That one is solid.
-  </p>
-  <p>
-    <code>pred=0x80000</code> gives <code>ZERO-HEADER-MISS</code>. <code>pred=0x100000</code>
-    gives <code>Unable to deserialize</code>. The window is one page wide. <code>0xa0000</code>
-    is the value that has landed twice.
-  </p>
-  <p>
-    <code>sep</code>, <code>guard</code>, <code>early</code>, <code>bfly</code> — swept
-    every value in range. No combination shifted the failure modes.
-  </p>
-
-  <h3>Every slot count, every drain size</h3>
-  <p>
-    <code>slots=4000000</code> fits. <code>slots=8700000</code> fits with <code>drain:64</code>.
-    <code>slots=9000000</code> OOMs on a settled boot. Above 8700000 the carrier itself is
-    more than the PS4 13.02 browser's sysmemory pool can hold, and the chain dies at
-    <code>ADDROF-PREP-BEGIN</code>.
-  </p>
-  <p>
-    The FW 11.00 reference chain runs <code>slots=20000000</code> — 160 MB. That is
-    2.2× what 13.02 allows. It is why their chain hits <code>READ-PRIMITIVE-PASS</code>
-    on the first try and mine needs cold boots. Their pattern covers the entire JSC heap.
-    Mine covers a fifth of it.
-  </p>
-
-  <h3>Timing is a gate, not a knob</h3>
-  <p>
-    Two failure modes bound the correct timing window:
-  </p>
-  <p>
-    <b>Open too early</b> → the OS is still claiming memory → <code>OOM</code> at
-    <code>ADDROF-PREP-BEGIN</code>. Observed at ~2 min after cold boot on my console.
-  </p>
-  <p>
-    <b>Open too late</b> → pages have been freed and zeroed by background collection
-    → <code>ZERO-HEADER-MISS hex=0000...</code>. Observed when waiting longer than
-    ~4 minutes.
-  </p>
-  <p>
-    The working window is narrow. It also moves per console and per boot. The honest
-    thing to do on your own hardware is to sweep intervals — 150 s, 180 s, 210 s,
-    240 s, 270 s, 300 s — two cold boots per interval, and record which interval
-    produces the fewest <code>OOM</code>s and the fewest <code>ZERO-HEADER-MISS</code>es.
-    That interval is your window.
-  </p>
-
-  <h2>The four outcomes</h2>
-
-  <p>
-    Every cold boot ends in exactly one of four classifications. Everything else in
-    the log is commentary.
-  </p>
-
-  <table>
-    <tr><th>tag</th><th>meaning</th></tr>
-    <tr><td><code>OOM</code></td><td>died before SSV. Memory budget or timing.</td></tr>
-    <tr><td><code>DESERIALIZE-FAIL</code></td><td>SSV ran, state blob clobbered. <code>Unable to deserialize</code>.</td></tr>
-    <tr><td><code>PLACEMENT-FAIL</code></td><td>SSV ran, blob survived, cell landed wrong. <code>ZERO-HEADER-MISS</code> / <code>VALIDATION-MISMATCH</code>.</td></tr>
-    <tr><td><code>PRIM-OK</code></td><td>SSV ran, cell landed on pattern. Primitive live.</td></tr>
-  </table>
-
-  <p>
-    The URL knobs change how often you get each tag. They do not change the fact that
-    only <code>PRIM-OK</code> proceeds.
-  </p>
-
-  <h2>Where the road actually ends</h2>
-
-  <p>
-    Here is the thing I have been circling. There is one function in
-    <code>core.js</code> whose absence is the difference between a per-boot hit rate
-    between 7% and 15% and a per-boot hit rate near 100%:
-  </p>
-
-  <p style="text-align:center;font-family:var(--mono);font-size:16px;color:var(--gold);margin:32px 0">
-    <code style="font-size:16px;padding:6px 12px">beforeCriticalLoad</code>
-  </p>
-
-  <p>
-    <code>core.js</code> accepts an option called <code>beforeCriticalLoad</code>. If
-    you pass one, it runs between the SSV grooming and the state-blob deserialization.
-    Its job is to nudge JSC's allocator into committing a fresh cell at exactly the fake
-    address. With it, placement is deterministic. Without it, you get a stub that writes
-    a string to a hidden div and creates a Blob, and does nothing else.
-  </p>
-
-  <p>
-    That stub is what I have. That stub is why I cold boot.
-  </p>
-
-  <p>
-    The reference chain on FW 11.00 does not have a real <code>beforeCriticalLoad</code>
-    either. It wins because 160 MB of pattern covers the entire heap — any cell the
-    allocator hands out is inside the pattern. On 13.02, no carrier is big enough. The
-    missing callback is what substitutes for the missing memory.
-  </p>
-
-  <blockquote>
-    Whoever has a real <code>beforeCriticalLoad</code> for 13.02 is holding the one piece.
-    Everything in this chain depends on that one function. Every other knob — slab, pred,
-    sep, slots, drain — is a workaround for its absence.
-  </blockquote>
-
-  <h2>The probability model</h2>
-
-  <p>
-    Two independent gates. The chain must survive the first to test the second.
-  </p>
-
-  <p style="text-align:center;font-family:var(--mono);margin:24px 0;font-size:14px">
-    P(success) = P(T) × P(A | T)
-  </p>
-
-  <p>
-    <code>T</code> is the timing/allocator gate: the boot lands in the window where the
-    OS has stopped claiming memory but GC hasn't zeroed the pages. <code>A</code> is
-    the placement gate: the deserializer hands out the cell at exactly the address the
-    predecessor pattern covers.
-  </p>
-
-  <p>
-    Observed on my console:
-  </p>
-
-  <table>
-    <tr><th>quantity</th><th>estimate</th><th>note</th></tr>
-    <tr><td>P(T)</td><td>~0.25</td><td>fraction of cold boots in the timing window</td></tr>
-    <tr><td>P(A | T)</td><td>~0.15</td><td>fraction of in-window boots where placement lands</td></tr>
-    <tr><td>P(success)</td><td>~0.04</td><td>1 in ~25 cold boots</td></tr>
-  </table>
-
-  <p>
-    The exact number is uncertain. Two <code>PRIM-OK</code> events were observed across
-    the test session. Depending on how you count the trials — all cold boots, or only
-    the ones that reached the SSV stage — the point estimate is between 7% and 13%.
-    Two successes is too small a sample to distinguish 7% from 15%. The writeup's
-    "13–15%" figure should be read as a working estimate with a wide confidence
-    interval, not a measured rate.
-  </p>
-
-  <p>
-    <b>The URL knobs affect two things and only two things:</b> whether the carrier
-    covers the leaked string (coverage floor), and whether the total allocation fits
-    under the browser's sysmemory pool (memory ceiling). Whether they affect
-    <code>P(A | T)</code> at all — placement probability given a good timing roll — is
-    an open question the repository can answer but which has not been tested in a
-    controlled way.
-  </p>
-
-  <h2>Formula sheet</h2>
-
-  <p>
-    Two exact formulas, and everything else empirical.
-  </p>
-
-  <p><b>Coverage floor.</b> The carrier must be large enough to cover the leaked
-  string. If <code>copiedLength</code> chars were leaked:</p>
-
-  <p style="text-align:center;font-family:var(--mono);margin:16px 0">
-    slots ≥ (copiedLength − 8) / 4
-  </p>
-
-  <p>
-    On 13.02 the leaked string is either ~924,176 chars (short roll) or ~34,478,608
-    chars (long roll). So the floor is either ~231,042 slots or ~8,619,650 slots.
-  </p>
-
-  <p><b>Memory ceiling.</b> The total allocation must fit under the browser's sysmemory
-  pool. On <code>fn_leak.html</code> after cold boot, observed ceiling is ~84 MB ±2 MB.
-  The budget is:</p>
-
-  <p style="text-align:center;font-family:var(--mono);margin:16px 0">
-    slots × 8 + drain × drainsz + slab + pred + holes ≤ 84 MB
-  </p>
-
-  <p>
-    Which gives <code>slots ≤ ~9,175,040</code> with the working values of the other
-    knobs.
-  </p>
-
-  <p><b>Everything else is empirical.</b> The working <code>slab</code> and
-  <code>pred</code> values depend on the boot's KASLR seed and JSC's allocator state,
-  neither of which is observable from JS before the SSV runs. <code>slab=0x800000</code>
-  and <code>pred=0xa0000</code> are landings on a per-boot curve whose shape is not
-  visible from JavaScript. They are not derived.
-  </p>
-
-  <h2>How to run</h2>
-
-  <div class="note">
-    <b>Cold boot required.</b> Power off the PS4 and unplug it for
-    30 seconds. Plug back in, power on. Open the browser in the timing window you found
-    by sweeping. Do not open any other tab. A warm boot or a reload reuses the previous
-    renderer's heap and the chain will OOM at <code>ADDROF-PREP-BEGIN</code>.
-  </div>
-
-  <div class="note">
-    <b>If you see <code>AUTO-RETRY-SCHEDULED</code> in the log</b>, you are running a
-    stale cached copy of <code>core.js</code> or <code>fn_leak.js</code>. The current
-    build has <code>maxAttempts: 1</code> and will not retry in place. Serve the folder
-    with <code>Cache-Control: no-store</code>, or hard-clear the browser cache between
-    runs. The retry loop does not help — the second attempt reuses the first attempt's
-    heap garbage and fails at a different stage.
-  </div>
-
-  <p>
-    The launcher below applies the working defaults automatically. Press the button, the
-    chain runs once, one cold boot, one roll. If <code>PRIM-OK</code> does not print,
-    cold boot and try again.
-  </p>
-
-  <section class="launch">
-    <h2>Set sail</h2>
-    <p class="lead">
-      Press the button. The chain runs once. One attempt, one cold boot, one roll.
-    </p>
-    <button id="go">Run the chain</button>
-    <pre id="out"></pre>
-    <div id="state"></div>
-  </section>
-
-  <section class="prize" id="prize" hidden>
-    <h2>You found the one piece.</h2>
-    <p class="call">PRIM-OK printed. The chain is real.</p>
-    <p>
-      The full output is above. What I need is the block that starts with
-      <code>FN-HEAD</code> and ends with the last <code>FN_BYTES</code> line. That's
-      <code>pru_bind</code>'s disassembly as the runtime sees it. Post it publicly —
-      paste site, forum, DM, anywhere I can read it. Whoever sends it first confirms
-      whether this is a jailbreak or a wall.
-    </p>
-    <pre>FN-HEAD  fn=0xffffffff8........
-FN_RVA   0x........
-FN_HINT  1302.elf.c  ->  FUN_........
-FN_BYTES  (16 lines of hex)</pre>
-    <p class="sig">
-      — bel<br>
-      <span style="color:var(--muted);font-size:12px">
-        https://jb.0d01.wtf &nbsp;·&nbsp; https://x.com/belsploit
-      </span>
-    </p>
-  </section>
-
-  <h2>Portability</h2>
-
-  <p>
-    Everything published here is 13.02. The missing piece — <code>beforeCriticalLoad</code>
-    — is likely portable to the rest of the 13.x line, because it operates on JSC's
-    allocator, not on the kernel. The JSC deduplication bug that lets a
-    <code>history.state</code> clone alias a freed cell is a JavaScriptCore bug, not a
-    Sony bug. If the same shape of <code>history.replaceState</code> call produces the
-    same deserialization path on 13.04 as it does on 13.02, the callback should work
-    unchanged, and so should the JS-side heap shaping in <code>core.js</code>.
-  </p>
-
-  <p>
-    What definitely does not travel is every offset in <code>ps4_offsets.js</code>. The
-    kernel RVAs, the libkernel stub table, the WebKit gadget offsets, and every anchor
-    (<code>k__error</code>, <code>wk_expm1_builtin</code>, <code>k_kl_lock</code>,
-    <code>k_sysent_661</code>, <code>allproc</code>) are compiled into a specific
-    firmware build. On 13.04 they are all different. Anyone porting has to re-derive
-    every one from their own kernel dump — the same procedure documented for 13.02,
-    with the same tools.
-  </p>
-
-  <p>
-    For 13.50 and 13.52 I have nothing. I don't know if the callback ports, I don't
-    know if the SSV bug is present in their WebKit build, I don't know if the offsets
-    are anywhere near 13.04's. Those are hypotheses worth testing, not results.
-  </p>
-
-  <div class="note">
-    <b>Disclaimer.</b> I have personally tested this chain on 13.02 and only 13.02.
-    Everything above about 13.04, 13.50, and 13.52 is reasoning, not empirical result.
-    Do not take it as a guarantee — take it as a hypothesis worth testing. If you get
-    any non-13.02 result, whether that's a working <code>PRIM-OK</code>, a new failure
-    mode, or an offset that differs, please reach out.
-  </div>
-
-  <p style="color:var(--gold);font-weight:700;margin-top:28px">
-    Everything in this chain depends on one value. On 13.02, that value is
-    <code>beforeCriticalLoad</code>. On every other firmware, it's that plus every
-    offset in <code>ps4_offsets.js</code>. The first one is portable in theory. The
-    second one is a week of Ghidra per firmware.
-  </p>
-
-  <footer class="end">
-    <p>
-      Original SSV research: <b>Someone else</b>. 13.02 offsets: public dumps.
-      Kernel walk, <code>plausibleAddress</code> fix, and this writeup: bel.
-    </p>
-    <p>
-      <b>Everything in this chain depends on one value.</b> Whoever produces a working
-      <code>beforeCriticalLoad</code> for 13.02 has the one piece.
-    </p>
-    <p>
-      <a href="https://jb.0d01.wtf" target="_blank" rel="noopener">jb.0d01.wtf</a>
-      &nbsp;·&nbsp;
-      <a href="https://x.com/belsploit" target="_blank" rel="noopener">@belsploit</a>
-    </p>
-  </footer>
-
-</main>
+<div id="state">boot</div>
+<main><pre id="out"></pre></main>
+<footer>output is also mirrored to the developer console</footer>
 
 <script>
-(function () {
-  var outEl = document.getElementById("out");
-  var prizeEl = document.getElementById("prize");
-  var goBtn = document.getElementById("go");
-  var revealed = false;
-
-  function check() {
-    if (revealed) return;
-    var txt = outEl.textContent || "";
-    if (/^PRIM-OK\b/m.test(txt)) {
-      revealed = true;
-      prizeEl.hidden = false;
-      prizeEl.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }
-
-  if (window.MutationObserver) {
-    new MutationObserver(check).observe(outEl, {
-      childList: true, characterData: true, subtree: true
-    });
-  }
-  setInterval(check, 400);
-
-  goBtn.addEventListener("click", function () {
-    goBtn.disabled = true;
-    goBtn.textContent = "sailing\u2026";
-    outEl.textContent = "";
-
-    // Apply the working defaults to the page URL so core.js picks them up.
-    // core.js reads location.search at module load, not the script's query string.
-    if (!new URLSearchParams(location.search).has("slots")) {
-      var u = new URL(location.href);
-      u.searchParams.set("slots", "4000000");
-      u.searchParams.append("g", "drain:256");
-      u.searchParams.append("g", "drainsz:0x2000");
-      u.searchParams.append("g", "slab:0x800000");
-      u.searchParams.append("g", "pred:0xa0000");
-      location.replace(u.toString());
-      return;
-    }
-
-    var s = document.createElement("script");
-    s.type = "module";
-    s.src = "./fn_leak.js?v=" + Date.now();
-    document.body.appendChild(s);
-  });
+/* FW label only. The log layer lives in fn_leak.js -- this stub
+   fills the header with the firmware tag before the module loads. */
+(function(){
+  var ua = navigator.userAgent || '';
+  var m  = /PlayStation\s+([45])[\/ ](\d+)\.(\d+)/.exec(ua);
+  document.getElementById('fw').textContent =
+      m ? ('PS' + m[1] + '-' + m[2] + '.' + m[3]) : 'non-PS';
 })();
 </script>
 
+<script type="module" src="./fn_leak.js"></script>
 </body>
 </html>

