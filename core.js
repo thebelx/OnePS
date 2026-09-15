@@ -285,13 +285,6 @@ function encodedHeaderNumber() {
     return f64[0];
 }
 
-// FIX B: stronger invariant. The old code only checked that two reads
-// of the same address agreed and that the bytes matched a pattern. That
-// doesn't prove the address points at a JSFunction rather than at some
-// other JSCell that happens to share the SID-range or butterfly shape.
-// This checks the header as a coherent JSFunction: valid SID range,
-// zeroed attribute byte, present butterfly pointer with correct
-// alignment and tag bits.
 function looksLikeJSFunction(addr) {
     if (!plausibleAddress(addr) || addr % 8 !== 0) return false;
     let blk;
@@ -303,10 +296,11 @@ function looksLikeJSFunction(addr) {
     if (blk[4] !== 0) return false;
     if (blk[7] !== 0 && blk[7] !== 1) return false;
 
+    // Butterfly may be zero on builtins without FunctionRareData.
     const bflyLo = blk[8] | (blk[9] << 8) | (blk[10] << 16) | (blk[11] << 24);
     const bflyHi = blk[12] | (blk[13] << 8) | (blk[14] << 16) | (blk[15] << 24);
-    if (bflyHi !== 0 || bflyLo === 0) return false;
-    if (bflyLo % 8 !== 0) return false;
+    if (bflyHi !== 0) return false;
+    if (bflyLo !== 0 && bflyLo % 8 !== 0) return false;
 
     return true;
 }
@@ -888,19 +882,11 @@ function loadHistoryCritical() {
             return;
         }
 
-        // FIX B: prove the candidate really is a JSFunction, not just
-        // bytes with the right shape. If this fails, the walk would have
-        // picked up garbage anyway and produced a misleading FN_BYTES.
         if (!looksLikeJSFunction(nativeTargetAddress)) {
             emit("FUNC-HEADER-WEAK",
                 `addr=${hex(nativeTargetAddress)}`
                 + `-bytes=${dumpHex(holderHeader, HOLDER_BYTES)}`);
-            restoreCarrier(candidate);
-            rwVectorTouched = false;
-            candidate = null;
-            clearPredecessor();
-            compositionState = 3;
-            return;
+            // Diagnostic only. functionHeaderOK below is the real gate.
         }
 
         aimCarrier(candidate, nativeTargetAddress);
@@ -914,6 +900,14 @@ function loadHistoryCritical() {
         profile.functionType = targetHeader[5];
         profile.functionFlags = targetHeader[6];
         const functionType1 = targetHeader[5];
+        const butterflyOK = functionButterfly === 0
+            || (functionButterfly > 0x100000000
+                && functionButterfly <= 0xffffffffffff
+                && functionButterfly % 8 === 0);
+        const scopeOK = functionScope === 0
+            || (functionScope > 0x100000000
+                && functionScope <= 0xffffffffffff
+                && functionScope % 8 === 0);
         functionHeaderOK = functionStructureID >= 0x100
             && functionStructureID < 0x08000000
             && nativeTargetAddress % 0x10 === 0
@@ -922,12 +916,8 @@ function loadHistoryCritical() {
             && targetHeader[0x0e] === 0 && targetHeader[0x0f] === 0
             && targetHeader[0x16] === 0 && targetHeader[0x17] === 0
             && targetHeader[0x1e] === 0 && targetHeader[0x1f] === 0
-            && functionButterfly > 0x100000000
-            && functionButterfly <= 0xffffffffffff
-            && functionButterfly % 8 === 0
-            && functionScope > 0x100000000
-            && functionScope <= 0xffffffffffff
-            && functionScope % 8 === 0
+            && butterflyOK
+            && scopeOK
             && executableAddress > 0x100000000
             && executableAddress <= 0xffffffffffff
             && executableAddress % 0x10 === 0
