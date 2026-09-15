@@ -649,13 +649,15 @@ function buildAndStoreGraph() {
     emit("SSV-BUILD", `k=${K}-n=${DRAIN_COUNT}`);
     fillerGraph = new Array(0xfffd);
     let pos = 0;
-    const huge = 1n << 40n;
+    
     for (let b = 0; b < FILLER_BIGINTS; ++b)
-        fillerGraph[pos++] = huge + BigInt(b);
+        fillerGraph[pos++] = 0x7fffffff + b; // Plain number instead of BigInt
+        
     for (let o = 0; o < FILLER_OBJECTS; ++o)
         fillerGraph[pos++] = {};
 
-    outerGraph = new Array(CONTROL_INDEX + 1);
+    outerGraph = new Array(CONTROL_INDEX + 1).fill(null);
+    
     outerGraph[0] = fillerGraph;
     outerGraph[1] = referenceTarget;
     outerGraph[2] = referenceTarget;
