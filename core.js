@@ -656,7 +656,7 @@ function buildAndStoreGraph() {
     for (let o = 0; o < FILLER_OBJECTS; ++o)
         fillerGraph[pos++] = {};
 
-    outerGraph = new Array(CONTROL_INDEX + 1).fill(null);
+    outerGraph = new Array(EXPECTED_LENGTH).fill(null);
     
     outerGraph[0] = fillerGraph;
     outerGraph[1] = referenceTarget;
