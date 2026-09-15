@@ -1,4 +1,4 @@
-    # OnePS
+# OnePS
 
 **The solution, or another wall.** The final piece of the PS4 13.02 jailbreak equation, and you're needed.
 
