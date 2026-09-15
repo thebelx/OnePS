@@ -2,67 +2,525 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#07131f">
-<title>fn_leak</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Death=(true)</title>
 <style>
-/* jb.0d01.wtf palette, watered down. No external CSS, no fonts, no images. */
-:root{
-  --ink:#d8f2f8; --muted:#7fa8b8; --dim:#4a7080;
-  --bg0:#06121b; --bg1:#0a1e2b; --panel:rgba(8,26,38,.72);
-  --line:rgba(57,174,202,.25); --cyan:#39aeca; --lime:#4a9f55;
-  --mono:Consolas,"DejaVu Sans Mono",monospace;
-}
-*{box-sizing:border-box}
-html,body{margin:0;padding:0;height:100%;background:var(--bg0);color:var(--ink);
-  font:13px/1.45 var(--mono);overflow:hidden}
-body{background:linear-gradient(180deg,var(--bg1) 0,var(--bg0) 60%,#050e15 100%);
-  display:flex;flex-direction:column}
-header{padding:10px 14px 8px;border-bottom:1px solid var(--line);
-  display:flex;align-items:baseline;gap:10px;flex:0 0 auto}
-h1{margin:0;font:700 15px/1.2 var(--mono);letter-spacing:.12em;color:var(--cyan)}
-h1 i{font-style:normal;color:var(--muted)}
-h1 b{font-weight:700;color:var(--lime)}
-#fw{margin-left:auto;color:var(--dim);font-size:11px;letter-spacing:.08em}
-#state{padding:6px 14px;font-size:11px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--lime);
-  border-bottom:1px solid var(--line);flex:0 0 auto}
-#state.warn{color:#d8a640}#state.bad{color:#d85858}#state.ok{color:var(--lime)}
-main{flex:1 1 auto;min-height:0;display:flex}
-#out{flex:1 1 auto;margin:0;padding:10px 14px 40vh;overflow-y:auto;
-  white-space:pre-wrap;word-break:break-all;font-size:11.5px;line-height:1.5;
-  color:var(--muted);
-  scrollbar-width:thin;scrollbar-color:var(--line) transparent}
-#out::-webkit-scrollbar{width:8px}
-#out::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
-#out b{color:var(--cyan);font-weight:700}
-#out .ok{color:var(--lime)}
-#out .warn{color:#d8a640}
-#out .bad{color:#d85858;font-weight:700}
-footer{padding:4px 14px;font-size:10px;color:var(--dim);
-  border-top:1px solid var(--line);letter-spacing:.06em;flex:0 0 auto}
+  :root {
+    --bg: #0c0c0e;
+    --panel: #141418;
+    --panel-2: #1a1a20;
+    --border: #26262e;
+    --fg: #d8d8de;
+    --muted: #7a7a86;
+    --dim: #55555e;
+    --accent: #7cb7ff;
+    --bad: #ff7b72;
+    --ok: #7ee787;
+    --warn: #d9a23a;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--fg);
+    font: 16.5px/1.72 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 80px 28px 140px; }
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em;
+            text-transform: uppercase; color: var(--dim); margin-bottom: 20px; }
+  h1 { font-family: var(--serif); font-size: 34px; line-height: 1.2;
+       margin: 0 0 12px; letter-spacing: -0.015em; font-weight: 400; }
+  h1 em { color: var(--muted); font-style: italic; }
+  .byline { color: var(--muted); font-size: 14px; margin: 0 0 48px;
+            font-family: var(--mono); }
+  h2 { font-family: var(--serif); font-size: 23px; font-weight: 400;
+       margin: 64px 0 14px; letter-spacing: -0.01em; }
+  h2::before { content: counter(sec, decimal) ". ";
+       counter-increment: sec;
+       color: var(--dim); font-family: var(--mono); font-size: 14px;
+       margin-right: 4px; }
+  h2 { counter-reset: none; }
+  main { counter-reset: sec; }
+  h2 + h2 { counter-increment: none; }
+  h3 { font-size: 15px; margin: 32px 0 10px; color: var(--accent);
+       font-family: var(--mono); letter-spacing: -0.01em; font-weight: 600; }
+  p { margin: 14px 0; }
+  p.lead { font-size: 18px; line-height: 1.6; color: #e8e8ec; }
+  code, pre { font-family: var(--mono); font-size: 13px; }
+  code { background: var(--panel-2); border: 1px solid var(--border);
+         padding: 1px 5px; border-radius: 3px; color: #e0e0e6;
+         font-size: 12.5px; }
+  pre { background: var(--panel); border: 1px solid var(--border);
+        padding: 16px 18px; border-radius: 5px; overflow-x: auto;
+        color: var(--fg); line-height: 1.6; font-size: 12.5px; }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0;
+          font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 12px;
+           border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px;
+       text-transform: uppercase; letter-spacing: 0.06em; }
+  td.mono { font-family: var(--mono); font-size: 12.5px; color: #c8c8d0; }
+  .dead { color: var(--bad); font-family: var(--mono); font-size: 12.5px; }
+  .live { color: var(--ok); font-family: var(--mono); font-size: 12.5px; }
+  .warn { color: var(--warn); font-family: var(--mono); font-size: 12.5px; }
+  blockquote { margin: 20px 0; padding: 4px 20px; border-left: 2px solid var(--border);
+               color: var(--muted); font-style: italic; font-family: var(--serif);
+               font-size: 17px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 60px 0 40px; }
+  a { color: var(--accent); text-decoration: none;
+      border-bottom: 1px solid rgba(124,183,255,0.25); }
+  a:hover { border-bottom-color: var(--accent); }
+  .foot { margin-top: 80px; color: var(--muted); font-size: 13px;
+          border-top: 1px solid var(--border); padding-top: 28px;
+          font-family: var(--mono); line-height: 1.8; }
+  .thanks { background: var(--panel); border: 1px solid var(--border);
+            border-radius: 6px; padding: 24px 28px; margin: 32px 0; }
+  .thanks p { margin: 10px 0; font-size: 15px; }
+  .thanks .name { color: var(--fg); font-weight: 600; }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 10.5px;
+         padding: 2px 7px; border-radius: 3px; border: 1px solid var(--border);
+         background: var(--panel-2); color: var(--muted); vertical-align: middle;
+         margin-left: 8px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .tag.bad { color: var(--bad); border-color: #3a1f22; }
+  .tag.ok { color: var(--ok); border-color: #1e3a28; }
+  .tag.warn { color: var(--warn); border-color: #3a2e1a; }
+  .sig { margin-top: 40px; font-family: var(--serif); font-size: 17px;
+         color: var(--muted); font-style: italic; }
 </style>
 </head>
 <body>
-<header>
-  <h1>One<i>.</i>PS</b></h1>
-  <span id="fw">detecting...</span>
-</header>
-<div id="state">boot</div>
-<main><pre id="out"></pre></main>
-<footer>output is also mirrored to the developer console</footer>
+<main>
 
-<script>
-/* FW label only. The log layer lives in fn_leak.js -- this stub
-   fills the header with the firmware tag before the module loads. */
-(function(){
-  var ua = navigator.userAgent || '';
-  var m  = /PlayStation\s+([45])[\/ ](\d+)\.(\d+)/.exec(ua);
-  document.getElementById('fw').textContent =
-      m ? ('PS' + m[1] + '-' + m[2] + '.' + m[3]) : 'non-PS';
-})();
-</script>
+<div class="kicker">Postmortem · 2026</div>
+<h1>OnePS on 13.02: <em>Death=(true)</em></h1>
+<p class="byline">bel · <a href="https://jb.0d01.wtf">jb.0d01.wtf</a></p>
 
-<script type="module" src="./fn_leak.js"></script>
+<p class="lead">
+  OnePS was real, but it was not the solution.
+</p>
+
+<p>
+  I'm writing this because the project promised a result either way, and the result
+  went the other way. A negative result is still a result. The next person who
+  tries to port this chain to 13.04 or 13.52 needs to know what's structural and
+  what's a knob, and the fastest way to give them that is to write it down while
+  it's still fresh.
+</p>
+
+<p>
+  Below: the two walls, the functions that were misidentified on the way, what
+  actually survived, and the state of 13.02 as of now.
+</p>
+
+<h2>The question, answered</h2>
+
+<p>
+  <strong>Does <code>pru_bind</code> copy the sockaddr, or retain a pointer to it?</strong>
+</p>
+
+<p>
+  It copies. The function was resolved against the 13.52 kernel dump, where the
+  <code>tcp6_usrreqs</code> table sits at <code>0xffffffff83c2fcd8</code> and the
+  <code>pru_bind</code> slot at <code>+0x18</code> points at
+  <code>FUN_ffffffff822c9fa0</code>. That function is <code>tcp6_usr_bind</code>.
+</p>
+
+<p>
+  <code>tcp6_usr_bind</code> reads the sockaddr's fields directly from the user
+  pointer — <code>sa_len</code>, <code>sa_family</code>, the port, the address
+  bytes — with no <code>sockargs</code> intermediary. It then passes the raw
+  user pointer to <code>in6_pcbbind</code>, which is
+  <code>FUN_ffffffff824c8b00</code>.
+</p>
+
+<p>
+  <code>in6_pcbbind</code> reads the sockaddr's fields again and copies the
+  address and port <em>values</em> into the <code>inpcb</code> at
+  <code>+0xc4</code>, <code>+0xc6</code>, <code>+0xd4</code>, <code>+0xe4</code>.
+  After <code>bind()</code> returns, no kernel structure holds a pointer to the
+  user's sockaddr. Freeing it does not leave a dangling reference.
+</p>
+
+<blockquote>
+  The premise of the chain was false. Everything downstream of the premise —
+  the SSV primitive, the ROP into libkernel, the <code>allproc</code> walk, the
+  <code>pr_usrreqs</code> dereference — was machinery built to reach one
+  function's disassembly. That disassembly says the vulnerability isn't there.
+</blockquote>
+
+<h3>The divergence from stock FreeBSD</h3>
+
+<p>
+  Stock FreeBSD 9's <code>tcp_usr_bind</code> calls <code>sockargs</code>, which
+  <code>copyin</code>s the user sockaddr into a kernel mbuf. The PCB-level bind
+  handler then reads from the mbuf, never from the user pointer. That's the
+  design that makes the syscall TOCTOU-free.
+</p>
+
+<p>
+  PS4's <code>tcp6_usr_bind</code> does not call <code>sockargs</code>. It reads
+  the user pointer directly, then hands that pointer to <code>in6_pcbbind</code>,
+  which reads it again. The lifetime question is still answered the same way —
+  nothing retains the pointer after the syscall — but the copyin intermediary
+  is gone. That's a TOCTOU exposure, not a UAF. It requires racing the syscall's
+  user reads against the user's page-table manipulation, and it does not produce
+  a memory-corruption primitive.
+</p>
+
+<h2>The TCP disconnect race is not a UAF</h2>
+
+<p>
+  Along the way a second hypothesis emerged from the <code>tcp_usr_disconnect</code>
+  body: <code>so_pcb</code> is re-read after both rwlocks are dropped, then
+  <code>so_pcb + 0x30</code> is dereferenced and bitwise-OR&nbsp;4'd. If a
+  concurrent <code>close()</code> freed the <code>inpcb</code> between the lock
+  drop and the re-read, the final write would land on freed memory.
+</p>
+
+<p>
+  <code>in_pcbdetach</code> settles it. It's <code>FUN_ffffffff82426100</code>:
+</p>
+
+<pre><code>void in_pcbdetach(long inp) {
+    *(undefined8 *)(*(long *)(inp + 0x58) + 0x18) = 0;   // so->so_pcb = NULL
+    *(undefined8 *)(inp + 0x58) = 0;                     // inp->inp_socket = NULL
+    return;
+}</code></pre>
+
+<p>
+  The null-store happens <em>first</em>. The free path
+  (<code>in_pcbfree</code>, <code>FUN_ffffffff824262b0</code>) runs after
+  <code>tcp_usr_detach</code> returns from <code>in_pcbdetach</code>, in every
+  branch. Any racer that wins the timing window causes the re-read to return
+  <code>NULL</code>, not a dangling pointer. The subsequent
+  <code>*(NULL + 0x30)</code> is a kernel panic, not a UAF.
+</p>
+
+<p>
+  Pattern A. Null-then-free. It's a crash primitive, not a memory-corruption
+  primitive.
+</p>
+
+<h2>The WebKit wall <span class="tag warn">structural</span></h2>
+
+<p>
+  The chain is bootstrapped on a bug in WebKit's
+  <code>SerializedScriptValue</code> deserializer: a fixed-capacity
+  <code>MemoryMap</code> that fails to track object identities once a threshold
+  is exceeded. If the map overflows, the duplicate entry at
+  <code>outerGraph[2]</code> is allocated fresh instead of reusing
+  <code>outerGraph[1]</code>'s reference. That fresh allocation is what the heap
+  groom turns into a fake <code>JSCell</code>.
+</p>
+
+<p>
+  On the WebKit build the PS4 reports — <code>AppleWebKit/605.1.15 (KHTML, like
+  Gecko) Version/17.0 Safari/605.1.15</code> — the deserializer has been rebased.
+  <code>MemoryMap</code> is a <code>HashMap</code>, not a fixed array. There is
+  no fixed capacity, no overflow, no identity loss.
+</p>
+
+<p>
+  This isn't the SSV being patched in the sense of "the code was removed." The
+  deserializer still allocates fresh cells for duplicate references when it
+  needs to. What it no longer does is <em>mistakenly</em> deduplicate, or
+  <em>mistakenly</em> allocate — the two failure modes the SSV groom relied on.
+  The bytes still alias; they just don't alias <em>here</em>.
+</p>
+
+<p>
+  Empirically, across hundreds of cold boots and every config ever tried, the
+  chain reaches one of exactly four outcomes:
+</p>
+
+<pre><code>ZERO-HEADER-MISS hex=0000...      cell landed in fresh zeros
+ZERO-HEADER-MISS hex=&lt;nonzero&gt;   cell landed on real but wrong JSC data
+VALIDATION-MISMATCH rw=true-holder=true   cell landed on the pattern, walk started
+PRIM-OK                            the one that counts
+</code></pre>
+
+<p>
+  <code>ZERO-HEADER-MISS</code> and <code>VALIDATION-MISMATCH</code> are both
+  <em>placement misses</em>. They are not "the bug is gone." The bug is
+  present — the deserializer does allocate a fresh cell — but the cell lands
+  somewhere other than the predecessor pattern. The observed per-boot rate is
+  in the 4–13% band. The reference chain on 11.00 hits first try because its
+  carrier is 160 MB and covers the entire heap. On 13.02 the browser's pool
+  caps at ~84 MB, so the pattern covers a fraction of the heap, and the
+  missing <code>beforeCriticalLoad</code> is what would substitute for the
+  missing memory.
+</p>
+
+<p>
+  If you are seeing <code>NORMAL-CLONE-MISS known-reference-returned=true</code>
+  on every cold boot, that is a different failure — it means the deserializer
+  is deduplicating correctly and no fresh allocation is being produced for the
+  duplicate index. That is the true structural wall. On the builds tested here,
+  the observed failure modes are <code>ZERO-HEADER-MISS</code> and
+  <code>VALIDATION-MISMATCH</code>, which place the failure in the groom, not
+  in the deserializer.
+</p>
+
+<h3>Why <code>beforeCriticalLoad</code> couldn't save it</h3>
+
+<p>
+  I was wrong about this one, and it's worth spelling out why.
+</p>
+
+<p>
+  The README describes <code>beforeCriticalLoad</code> as "the one piece." It's
+  a JSC allocator nudge: allocate N cells of a given shape, drop them, and the
+  freelist head moves so the <em>next</em> JSObject allocation lands on the
+  predecessor's <code>fakeAddress</code> pattern. That's what makes the
+  difference between a 4–13% per-boot rate and something closer to 100%.
+</p>
+
+<p>
+  But the nudge operates on <em>placement</em>. It assumes the deserializer
+  is about to allocate. On 13.02, it sometimes does and sometimes doesn't. A
+  nudge tuned for the pre-17.0 allocator geometry does not move the freelist
+  in the direction the deserializer is looking. We swept <code>?nudge=</code>
+  from 1 to 32 against every <code>?shape=</code> variant. The failure mode
+  never shifted out of the placement-miss band. The nudge is not the missing
+  piece on this WebKit build; the piece it was meant to substitute for is a
+  160 MB carrier budget that this firmware's browser does not have.
+</p>
+
+<h2>What I got wrong</h2>
+
+<p>
+  Several functions were misidentified on the way down. Worth writing down so
+  nobody repeats them.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Address</th><th>I claimed</th><th>It actually is</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="mono">822c8d10</td><td>pru_disconnect</td><td class="mono">pru_attach</td></tr>
+    <tr><td class="mono">822c8bd0</td><td>pru_detach</td><td class="mono">pru_accept</td></tr>
+    <tr><td class="mono">82426100</td><td>tcp_discardcb</td><td class="mono">in_pcbdetach</td></tr>
+    <tr><td class="mono">822c9fa0</td><td>pru_peeraddr</td><td class="mono">tcp6_usr_bind</td></tr>
+    <tr><td class="mono">824c8b00</td><td>in_pcbbind</td><td class="mono">in6_pcbbind</td></tr>
+  </tbody>
+</table>
+
+<p>
+  The mistaken identification of <code>822c8d10</code> as the disconnect path
+  is what generated the entire TCP race hypothesis. Once the table was resolved
+  correctly against the standard <code>pr_usrreqs</code> layout and the sibling
+  function bodies, the sequence turned out to be an attach-path state
+  initialization — which is not race-prone, because it runs before any
+  concurrent access is possible.
+</p>
+
+<p>
+  The table offsets also don't follow stock FreeBSD. <code>pru_detach</code> is
+  at <code>+0x38</code>, but <code>pru_control</code> sits at <code>+0x30</code>
+  pointing outside the <code>tcp_usrreq.c</code> address range, and slot
+  <code>+0x28</code> is NULL rather than a connect2 handler. Deriving entries by
+  offset from a single known function doesn't work on this kernel. Read the
+  table, don't compute it.
+</p>
+
+<h2>What survived</h2>
+
+<p>
+  Not everything that came out of the project was a wall. The durable
+  contributions:
+</p>
+
+<h3>The <code>ALLPROC</code> correction</h3>
+
+<p>
+  <code>0x01CA8538</code>, not the widely-published <code>0x01B28538</code>.
+  Derived from <code>procinit</code> at <code>FUN_0080e2c0</code>. The
+  difference is <code>0x180000</code>. Every published table I've seen has the
+  wrong value, and this one is confirmed against the 13.02 binary.
+</p>
+
+<h3>The carrier ceiling</h3>
+
+<p>
+  <code>slots × 8 + drain × drainsz + slab + pred + holes ≤ 84&nbsp;MB</code>
+  is the correct budget for the browser's sysmemory pool on 13.02. The derived
+  bound <code>slots ≤ ~9,175,040</code> matches observation exactly — anything
+  above it OOMs, anything below the coverage floor
+  (<code>slots ≥ (copiedLength - 8) / 4</code>) fails <code>ADDROF-FAIL</code>
+  with <code>source-covered=false</code>. This math holds regardless of what
+  the SSV does.
+</p>
+
+<h3>The ROP harness</h3>
+
+<p>
+  The <code>makeCtx</code>/<code>layout</code>/<code>callAddr</code> machinery,
+  the gadget encodings, the stub scanner, and the
+  <code>pr_usrreqs</code> table indexing are all correct for 13.02's WebKit.
+  They're reusable the moment any kernel primitive exists on this firmware.
+  The gadget table alone — 15 entries with byte-level validation — is worth
+  keeping.
+</p>
+
+<h3>The negative results</h3>
+
+<p>
+  "The sockaddr is copied" and "the disconnect race null-then-frees" are the
+  two findings that matter. Both independently verified against the kernel
+  binary. Both close entire families of exploit hypotheses. Both save the next
+  person the same weeks of work.
+</p>
+
+<h2>State of 13.02</h2>
+
+<p>
+  Every public path to a kernel primitive on this firmware is closed:
+</p>
+
+<table>
+  <thead>
+    <tr><th>Path</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>WebKit SSV overflow</td><td class="warn">SSV bug present, placement rate 4–13% — needs <code>beforeCriticalLoad</code> to become reliable</td></tr>
+    <tr><td><code>pru_bind</code> sockaddr retention</td><td class="dead">refuted — in6_pcbbind copies values</td></tr>
+    <tr><td><code>pru_disconnect</code> race</td><td class="dead">null-then-free — panic, not UAF</td></tr>
+    <tr><td><code>evf</code>/<code>rthdr</code> kqueue race</td><td class="warn">needs <code>k_evf_cv</code> for 13.02; no 12.00 dump available</td></tr>
+    <tr><td>BD-J / Blu-ray</td><td class="warn">userland reachable; requires a BD drive</td></tr>
+    <tr><td>PPPwn</td><td class="dead">patched before 13.02</td></tr>
+  </tbody>
+</table>
+
+<p>
+  The three rows marked <span class="warn">warn</span> are the only live
+  threads. SSV placement needs <code>beforeCriticalLoad</code> to reach
+  reliability. <code>evf</code> needs one offset that requires a 12.00 kernel
+  dump to derive. BD-J needs hardware. None of the three is reachable from a
+  browser session in a single boot on this console.
+</p>
+
+<hr>
+
+<h2>Thanks</h2>
+
+<div class="thanks">
+  <p>
+    This thing only got as far as it did because a lot of people did work
+    they didn't have to.
+  </p>
+  <p>
+    <span class="name">The critique</span> that came back on my TCP race
+    analysis was right on every point and wrong on none. It cut the
+    hypothesis down to what could actually be verified, and it's the reason
+    the refutation is clean instead of hand-wavy. Whoever wrote that: thank
+    you for reading closely.
+  </p>
+  <p>
+    <span class="name">Dr.YenYen</span> called me out on this entire thought
+    and said that it wouldnt work off the bat, they were right about one thing and it's
+    the one thing worth saying out loud: userland read/write is not a
+    jailbreak. It's a foundation. It runs inside the browser process, doesn't
+    survive close, and doesn't touch the kernel. Calling it "the solution"
+    in any public post was overclaiming, and the correction is fair. Where
+    the argument broke down was the framing on both sides, I said "close to
+    the solution" when I should have said "close to a reusable primitive,"
+    and the response turned into something that wasn't about the technical
+    question anymore. The distinction between "a primitive exists" and "a
+    jailbreak exists" is the whole reason this postmortem has a section
+    called "What survived" instead of "The solve." Thank you for making that
+    line sharper,its okay that you were a shithead in tone, we are here now.
+  </p>
+  <p>
+    <span class="name">The slopkit contributors</span> — the original WebKit
+    work that OnePS is a port of. The grooming geometry, the drain layout,
+    the carrier sizing. None of that was invented here. It was reproduced.
+  </p>
+  <p>
+    <span class="name">Scene-Collective and ps4-hen</span> for the 13.02
+    kernel RVAs and the offsets that made the Ghidra work possible.
+    <span class="name">zecoxao</span> for the 13.04 WebKit dump.
+    <span class="name">mansoor0x</span> and the polpNO contributors for the
+    memory bridge and the offset table structure.
+    <span class="name">jordyidk</span> for slopkit itself.
+    <span class="name">OptiTronOffical</span> for the BD-J work and the
+    13.02 kernel offsets in the readme.
+  </p>
+  <p>
+    <span class="name">Everyone who cold-booted their console</span> and
+    pasted back a log — the four-outcome ladder, the timing sweep, the
+    placement statistics. That data is what turned this from an anecdote
+    into a set of measurements. Thank you.
+  </p>
+  <p>
+    And <span class="name">the people who told me I was wrong</span> at
+    every step. The premise, the function identification, the nudge, the
+    race. The project only works if the negative results are honest, and
+    honest negative results come from being told where the reasoning broke.
+  </p>
+</div>
+
+<h2>What to do next</h2>
+
+<p>
+  If you're porting this chain to 13.04 or later:
+</p>
+
+<ol>
+  <li>
+    <strong>Check the WebKit build first.</strong> If it's
+    <code>Version/17.0 Safari/605.1.15</code> or newer, the deserializer
+    has been rebased. The SSV groom is a placement lottery at best. Confirm
+    the failure mode is <code>ZERO-HEADER-MISS</code> or
+    <code>VALIDATION-MISMATCH</code> and not
+    <code>NORMAL-CLONE-MISS known-reference-returned=true</code> before you
+    spend time on the kernel side.
+  </li>
+  <li>
+    <strong>Read the <code>pr_usrreqs</code> table, don't compute it.</strong>
+    The 13.02 and 13.52 layouts are non-stock. Deriving entries by offset from
+    a single known function gives wrong answers.
+  </li>
+  <li>
+    <strong>Verify <code>in_pcbdetach</code>'s ordering before trusting any
+    race hypothesis.</strong> If it nulls <code>so_pcb</code> before freeing,
+    the race is a panic, not a UAF, and it isn't worth the two-thread harness.
+  </li>
+  <li>
+    <strong>Re-derive every offset.</strong> The kernel RVAs, the stub table,
+    the WebKit gadgets, and the anchors are all compiled into a specific
+    firmware build. Nothing in <code>ps4_offsets.js</code> ports.
+  </li>
+  <li>
+    <strong>If you have <code>beforeCriticalLoad</code> for 13.02, that's the
+    one piece.</strong> It's the difference between a 4–13% placement rate and
+    something usable. Every other knob — slab, pred, sep, slots, drain — is a
+    workaround for its absence.
+  </li>
+</ol>
+
+<p>
+  If you're looking for a fresh angle on 13.02: the three live threads are
+  SSV placement (needs the missing nudge), <code>evf</code> (needs a 12.00
+  kernel dump), and BD-J (needs hardware). The first is the only one reachable
+  from a browser session. If a 12.00 kernel dump surfaces,
+  <code>k_evf_cv</code> becomes derivable and the race path reopens. Until
+  then, the honest answer is that there's no public route from a browser.
+</p>
+
+<div class="sig">— bel</div>
+
+<div class="foot">
+  Ghidra addresses relative to kernel base <code>0xffffffff80000000</code>.<br>
+  Disassembly dump: <code>1302.elf.c</code> and 13.52 equivalent.<br>
+  Tested on 13.02 and 13.52 only.<br>
+  If you get a non-13.02 result, please reach out.
+</div>
+
+</main>
 </body>
 </html>
